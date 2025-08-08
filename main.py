@@ -21,7 +21,7 @@ def use_user():
 
 
 @component
-def Keystroke(on_key, name):
+def Keystroke(on_key):
     state, set_state = hooks.use_state({"key": "", "timestamp": 0})
     dispatcher = hooks.get_service("input_dispatcher", _InputDispatcher)
 
@@ -84,7 +84,7 @@ def Child(name, on_count):
     
     hooks.use_effect(effect, [user, count])
     hooks.use_effect(unmount, [])
-    return [Keystroke(key=f"key-{name}", on_key=handle_key, name=name)]
+    return [Keystroke(on_key=handle_key)]
 
 @component
 def Parent():
@@ -96,18 +96,15 @@ def Parent():
 
     if show:
         return [
-            Child(name="A", on_count=handle_count),
-            Child(name="B", on_count=handle_count),
+            Child(key="A", name="A", on_count=handle_count),
+            Child(key="B", name="B", on_count=handle_count),
         ]
     else:
         return [ Child(name="C", on_count=handle_count) ]
 
 @component
 def App():
-    user, set_user = hooks.use_state("Anonymous")
-    def iniciar():
-        set_user("Edmar")
-    hooks.use_effect(iniciar, [])
+    user = hooks.use_state("Anonymous")[0]
 
     return [UserContext(value=user, children=[Parent()])]
 

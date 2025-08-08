@@ -8,25 +8,28 @@ from runtime import schedule_rerender
 
 
 def provider(ctx_var, *, prop="value"):
-    def deco(fn):
+    def decorator(body_fn):
         @component
-        @wraps(fn)
+        @wraps(body_fn)
         def wrapper(*, key=None, **props):
+
             try:
                 value = props.pop(prop)
             except KeyError:
                 raise TypeError(f"Provider missing required prop '{prop}'")
 
-            def effect():
-                token = ctx_var.set(value)
-                return lambda: ctx_var.reset(token)
+            token = ctx_var.set(value)
 
-            hooks.use_effect(effect, [value])
-            return fn(**props)
+            def cleanup():
+                ctx_var.reset(token)
+
+            # registra o cleanup – roda no próximo commit ou un-mount
+            hooks.use_effect(lambda: cleanup, [value])
+
+            return body_fn(**props)
 
         return wrapper
-
-    return deco
+    return decorator
 
 def create_context(*, default=None, name="Context", prop="value"):
     ctx_var   = ContextVar(name, default=default)
