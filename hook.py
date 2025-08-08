@@ -6,8 +6,6 @@ import asyncio
 
 import warnings
 
-
-
 class HookContext:
     _services: Dict = {}
 
@@ -47,11 +45,8 @@ class HookContext:
 
     def use_effect(self, effect_fn, deps):
 
-        if deps is None:
-            deps_key = None
-        else:
-            deps_key = tuple(deps)            # [] → ()   (objeto imutável)
-
+        deps_key = None if deps is None else tuple(deps)    # [] → ()   (objeto imutável)
+   
         idx = self.hook_idx
 
         if idx >= len(self.hooks):            # primeiro mount
@@ -66,10 +61,8 @@ class HookContext:
         self.hook_idx += 1
 
     def use_callback(self, fn, deps=None):
-        if deps is None:
-            deps_key = None      # nunca re-muda
-        else:
-            deps_key = tuple(deps)
+
+        deps_key = None if deps is None else tuple(deps)    # [] → ()   (objeto imutável)
 
         idx = self.hook_idx
 
@@ -87,7 +80,7 @@ class HookContext:
     
     def use_memo(self, factory, deps=None):
 
-        key = None if deps is None else tuple(deps)
+        key = None if deps is None else tuple(deps)  # [] → ()   (objeto imutável)
         idx = self.hook_idx
 
         if idx >= len(self.hooks):               # primeira vez
@@ -109,8 +102,8 @@ class HookContext:
             subscribe(self)                        
             subs_set = getattr(ctx_like, "_subs")
 
-            # guarda referência p/ poder executar no unmount
-            if subs_set not in self.__dict__.setdefault("_ctx_subs", []):
+            
+            if subs_set not in self.__dict__.setdefault("_ctx_subs", []):   # guarda referência p/ poder executar no unmount
                 self._ctx_subs.append(subs_set)
 
         idx   = self.hook_idx
@@ -137,39 +130,31 @@ class HookContext:
                 pass
 
     def unmount(self):
-        # 1. clean-ups gerados por use_effect
-        # ------------------------------------------------------------------
-        for slot in self.hooks:
+        
+        for slot in self.hooks:                     # 1. clean-ups gerados por use_effect
             if isinstance(slot, tuple):
                 cleanup, _deps = slot
                 if cleanup:
                     try:
                         if asyncio.iscoroutinefunction(cleanup):
-                            # roda assíncrono em background
-                            asyncio.create_task(cleanup())
+                            asyncio.create_task(cleanup())      # roda assíncrono em background
                         else:
                             cleanup()
                     except Exception:
                         pass
 
-        # 2. remove-se dos WeakSets de assinantes de Context
-        # ------------------------------------------------------------------
-        for ws in getattr(self, "_ctx_subs", []):
+        for ws in getattr(self, "_ctx_subs", []):   # 2. remove-se dos WeakSets de assinantes de Context
             ws.discard(self)
             
-        # 3. libera a lista para GC
-        # ------------------------------------------------------------------
-        if hasattr(self, "_ctx_subs"):
+        
+        if hasattr(self, "_ctx_subs"):              # 3. libera a lista para GC
             self._ctx_subs.clear()
 
-        # 4. desmonta recursivamente os filhos
-        # ------------------------------------------------------------------
-        for child in self.children:
+        for child in self.children:                 # 4. desmonta recursivamente os filhos
             child.unmount()
 
-        # 4. forca GC
-        # ------------------------------------------------------------------
-        self.children.clear()
+        
+        self.children.clear()                       # 5. forca GC
         self.hooks.clear()
         self.effects.clear()
 
@@ -181,36 +166,30 @@ class HookContext:
             self.hook_idx = 0
             self.effects = []
 
-            # 1. guarda os filhos antigos e começa uma nova lista vazia
-            # ------------------------------------------------------------------
-            old_children = self.children
+            old_children = self.children                # 1. guarda os filhos antigos e começa uma nova lista vazia
             self.children = []
 
 
-            # 2. executa a função do componente
-            # ------------------------------------------------------------------
-            output = self.component_fn(__internal=True, **self.props)
+            output = self.component_fn(__internal=True, **self.props)       # 2. executa a função do componente
             vnodes = output if isinstance(output, list) else [output]
 
 
-            # 3. reconciliação – reaproveita ou cria contextos-filho
-            # ------------------------------------------------------------------
-            for idx, vnode in enumerate(vnodes):
+            
+            for idx, vnode in enumerate(vnodes):        # 3. reconciliação – reaproveita ou cria contextos-filho
                 if not isinstance(vnode, VNode):
                     continue
 
                 vnode_key = vnode.key if vnode.key is not None else f"__idx_{idx}"
 
-                # procura match em old_children
-                matched = next(
+                
+                matched = next(                         # 4. procura match em old_children
                     (c for c in old_children
                      if (c.key if c.key is not None else f"__idx_{old_children.index(c)}") == vnode_key
                         and c.component_fn is vnode.component_fn),
                     None
                 )
 
-                # ---------- warn se há irmãos duplicados sem key --------
-                if vnode.key is None:
+                if vnode.key is None:               # 5. warn se há irmãos duplicados sem key
 
                     dup = any(
                         (c.component_fn is vnode.component_fn and c.key is None)
@@ -235,19 +214,17 @@ class HookContext:
 
                 self.children.append(matched)
 
-            # 4. desmonta órfãos
-            # ------------------------------------------------------------------
-            for orphan in old_children:
+            
+            for orphan in old_children:         # 6. desmonta órfãos recursivamente
                 if orphan not in self.children:
-                    orphan.unmount()          # executa clean-ups recursivamente
+                    orphan.unmount()
 
-            # 5. renderiza recursivamente os filhos atuais
-            # ------------------------------------------------------------------
-            for child in self.children:
+            
+            for child in self.children:         # 7. renderiza recursivamente os filhos atuais
                 child.render()
         finally:
-            # restaura o componente anterior e o stack original
-            core._context_stack.reset(token)
+            
+            core._context_stack.reset(token)    # 8. restaura o componente anterior e o stack original
 
     async def run_effects(self):
         for fx, deps, idx in self.effects:
