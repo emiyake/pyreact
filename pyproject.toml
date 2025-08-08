@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "reactpy_custom"
+version = "0.1.0"
+description = ""
+authors = ["Edmar Miyake <edmar.miyake@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+fastapi = {extras = ["standard"], version = "^0.116.1"}
+watchgod = "^0.8.2"
+uvicorn = "^0.35.0"
+nicegui = "^2.21.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
