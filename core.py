@@ -10,7 +10,7 @@ class _HookProxy:
         comp = _context_stack.get() # linha que garante que a instância correta do component é utilizada no hook. (setado no "render" do HooksContext)
         if comp is None:
             raise RuntimeError(
-                f"hook.{name}() só pode ser usado durante o render ou effect"
+                f"hook.{name}() can only be used during render or effect."
             )
         return getattr(comp, name)
 

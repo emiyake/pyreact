@@ -218,7 +218,7 @@ class HookContext:
                     )
                     if dup:
                         warnings.warn(
-                            f"\n\n⚠️ [HookContext] Sibling <{vnode.component_fn.__name__}> sem 'key' explícita; pode causar re-montagens extras.",
+                            f"\n\n⚠️ [HookContext] Sibling <{vnode.component_fn.__name__}> with no explicit 'key'; it can cause extra re-render.",
                             RuntimeWarning,
                             stacklevel=2,
                         )
