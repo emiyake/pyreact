@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "reactpy_custom"
+name = "pyreact"
 version = "0.1.0"
 description = ""
 authors = ["Edmar Miyake <edmar.miyake@gmail.com>"]
