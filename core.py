@@ -5,7 +5,7 @@ from functools import wraps
 _context_stack = ContextVar("component_context", default=None)
 
 class _HookProxy:
-    """Encaminha atributos para o componente em execução."""
+
     def __getattr__(self, name):
         comp = _context_stack.get() # linha que garante que a instância correta do component é utilizada no hook. (setado no "render" do HooksContext)
         if comp is None:

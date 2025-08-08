@@ -4,16 +4,13 @@ from core import component, hooks
 from hook import HookContext
 from input_dispatcher import _InputDispatcher
 from provider import create_context
+from router import Route, Router, use_route
 from runtime import run_renders, schedule_rerender
 import time
 
-# ainda em draft!!
 UserContext = create_context(default="anonymous", name="User")
 
 def use_user():
-    """
-    Devolve `(user, set_user)`; qualquer mudança re-renderiza consumidores.
-    """
     user = hooks.use_context(UserContext)
     def _set(u):
         UserContext.set(u)
@@ -41,75 +38,48 @@ def Keystroke(on_key):
 
     return []  
 
-# @component
-# def Child(label):
-#     count, set_count = hooks.use_state(0)
 
-#     # incrementa seu próprio estado toda vez que monta
-#     hooks.use_effect(lambda: set_count(lambda v: v + 1), [])
-
-#     hooks.use_effect(
-#         lambda: print(f"{label}: count={count}"), [count]
-#     )
-#     return []
-
-# @component
-# def Parent():
-#     return [
-#         Child(key="A", label="ChildA"),
-#         Child(key="B", label="ChildB")
-#     ]
+@component
+def Text(text: str):
+    hooks.use_effect(lambda: print(text), [])
+    return []
 
 
 @component
-def Child(name, on_count):
+def Link(to, label):
+    _, navigate = use_route()
 
-    count, set_count = hooks.use_state(0)
+    def handle(k):
+        if k == label[0].lower():
+            navigate(to)
 
-    user, set_user = use_user()
-
-    def handle_key(char):
-        if (char == name):
-            next_val = count + 1
-            set_count(next_val) 
-            on_count(next_val)
-        if (char == "C"):
-            set_user(f"Novo user {name}")
-
-    async def effect():
-        print(f"👶 Child({name}) [user={user}] count={count}")
-
-    def unmount():
-        return lambda: print(f"❌ Cleanup: Child({name})")
-    
-    hooks.use_effect(effect, [user, count])
-    hooks.use_effect(unmount, [])
-    return [Keystroke(on_key=handle_key)]
+    return [Keystroke(on_key=handle)]
 
 @component
-def Parent():
-    show, set_show = hooks.use_state(True)
+def Home():
+    return [Text(key="h", text="🏠 Home")]
 
-    def handle_count(count):
-        if count > 2:
-            set_show(False)
+@component
+def About():
+    return [Text(key="a", text="ℹ️  About")]
 
-    if show:
-        return [
-            Child(key="A", name="A", on_count=handle_count),
-            Child(key="B", name="B", on_count=handle_count),
-        ]
-    else:
-        return [ Child(name="C", on_count=handle_count) ]
+@component
+def NotFound():
+    return [Text(key="404", text="404 – not found")]
 
 @component
 def App():
-    user = hooks.use_state("Anonymous")[0]
-
-    return [UserContext(value=user, children=[Parent()])]
-
-
-
+    return [
+        Router(
+            initial="/",
+            children=[
+                Route(key="r1", path="/",          children=[Home(key="home")]),
+                Route(key="r2", path="/about",     children=[About(key="about")]),
+                Link(key="l1", to="/",      label="home"),
+                Link(key="l2", to="/about", label="about"),
+            ],
+        )
+    ]
 
 app_root = HookContext("App", App)
 

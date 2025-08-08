@@ -73,7 +73,7 @@ class HookContext:
 
         idx = self.hook_idx
 
-        if idx >= len(self.hooks):               # 1ª vez
+        if idx >= len(self.hooks):            # primeira vez
             self.hooks.append((fn, deps_key))
         else:
             cached_fn, old_deps = self.hooks[idx]
@@ -84,6 +84,22 @@ class HookContext:
 
         self.hook_idx += 1
         return fn
+    
+    def use_memo(self, factory, deps=None):
+
+        key = None if deps is None else tuple(deps)
+        idx = self.hook_idx
+
+        if idx >= len(self.hooks):               # primeira vez
+            self.hooks.append((factory(), key))
+        else:
+            value, old_key = self.hooks[idx]
+            if key is not None and old_key != key:
+                value = factory()                # deps mudaram
+                self.hooks[idx] = (value, key)
+
+        self.hook_idx += 1
+        return self.hooks[idx][0]
     
     def use_context(self, ctx_like):
         ctx = getattr(ctx_like, "_ctx", ctx_like)
@@ -195,7 +211,7 @@ class HookContext:
 
                 # ---------- warn se há irmãos duplicados sem key --------
                 if vnode.key is None:
-                    # já existe um irmão do mesmo tipo sem key?
+
                     dup = any(
                         (c.component_fn is vnode.component_fn and c.key is None)
                         for c in self.children
