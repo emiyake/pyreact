@@ -1,7 +1,7 @@
 from typing import Dict
 from weakref import WeakSet
-from core import VNode 
-from runtime import schedule_rerender
+from pyreact.core.core import VNode 
+from pyreact.core.runtime import schedule_rerender
 import asyncio
 
 import warnings
@@ -159,7 +159,7 @@ class HookContext:
         self.effects.clear()
 
     def render(self):
-        import core
+        import pyreact.core.core as core
         token = core._context_stack.set(self)
 
         try:

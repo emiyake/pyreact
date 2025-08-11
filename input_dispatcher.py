@@ -1,7 +1,7 @@
 import asyncio
 from weakref import WeakSet
 from typing import Optional
-from runtime import get_render_idle
+from pyreact.core.runtime import get_render_idle
 
 class _InputDispatcher:
     def __init__(self) -> None:

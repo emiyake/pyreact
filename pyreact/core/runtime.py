@@ -34,15 +34,13 @@ def schedule_rerender(ctx):
 
 
 async def run_renders() -> None:
-    from hook import HookContext   # import aqui para evitar loop infinito
+    from pyreact.core.hook import HookContext   # import aqui para evitar loop infinito
 
     while not rerender_queue.empty():
         ctx: HookContext = await rerender_queue.get()
         _enqueued.discard(ctx)
         ctx.render()
         await ctx.run_effects()
-
-        
 
     if rerender_queue.empty():
         get_render_idle().set()    # volta a ficar ocioso

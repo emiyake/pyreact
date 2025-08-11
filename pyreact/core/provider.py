@@ -3,9 +3,8 @@
 from contextvars import ContextVar
 from functools import wraps
 from weakref import WeakSet
-from core import component, hooks
-from runtime import schedule_rerender
-
+from pyreact.core.core import component, hooks
+from pyreact.core.runtime import schedule_rerender
 
 def provider(ctx_var, *, prop="value"):
     def decorator(body_fn):
