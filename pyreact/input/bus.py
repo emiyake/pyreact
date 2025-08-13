@@ -1,7 +1,7 @@
 from typing import Callable, List, TypedDict, Literal
 
 class Event(TypedDict, total=False):
-    type: Literal["text", "submit", "key"]   # expanda se quiser
+    type: Literal["text", "submit", "key"]   # expand if desired
     value: str
     source: Literal["web", "term"]
     ts: float
@@ -9,7 +9,7 @@ class Event(TypedDict, total=False):
 Subscriber = Callable[[Event], None]
 
 class InputBus:
-    """Barramento de entrada (thread-safe o suficiente para o uso com asyncio)."""
+    """Input bus (thread-safe enough for use with ``asyncio``)."""
     def __init__(self) -> None:
         self._subs: List[Subscriber] = []
 
@@ -28,5 +28,5 @@ class InputBus:
             try:
                 fn(ev)
             except Exception:
-                # não deixa um subscriber ruim matar os outros
+                # don't let a bad subscriber kill the others
                 pass

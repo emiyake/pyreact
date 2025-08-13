@@ -3,10 +3,10 @@ from pyreact.input.bus import InputBus, Event
 
 @component
 def Keystroke(on_change=None, on_submit=None):
-    """
-    Coleta texto do InputBus.
-    - on_change(text): a cada mudança de texto
-    - on_submit(text): quando usuário confirma (Enter)
+    """Collect text from the :class:`InputBus`.
+
+    - ``on_change(text)``: called on every text change
+    - ``on_submit(text)``: called when the user confirms (Enter)
     """
     state, set_state = hooks.use_state({"text": "", "submit_ver": 0})
     bus = hooks.get_service("input_bus", InputBus)
@@ -19,7 +19,7 @@ def Keystroke(on_change=None, on_submit=None):
         elif t == "submit":
             set_state(lambda s: {"text": v, "submit_ver": s["submit_ver"] + 1})
         elif t == "key":
-            # se quiser, trate char-a-char aqui (opcional)
+            # handle character-by-character here if desired (optional)
             pass
 
     def _mount():

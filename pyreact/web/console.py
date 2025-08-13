@@ -5,7 +5,7 @@ _original_print = builtins.print
 _enabled = False
 
 class ConsoleBuffer:
-    """Acumula tudo que foi 'printado' e notifica assinantes (server push)."""
+    """Accumulates all printed output and notifies subscribers (server push)."""
     def __init__(self) -> None:
         self._chunks: List[str] = []
         self._subs: List[Callable[[str], None]] = []
@@ -21,7 +21,7 @@ class ConsoleBuffer:
                 pass
 
     def dump(self) -> str:
-        # Conteúdo bruto (sem escape). No SSR faremos escape.
+        # Raw content (no escaping). SSR will handle escaping.
         return "".join(self._chunks)
 
     def subscribe(self, fn: Callable[[str], None]) -> None:
@@ -35,7 +35,7 @@ class ConsoleBuffer:
             pass
 
 def enable_web_print(echo_to_server_stdout: bool = True) -> None:
-    """Redireciona print() para ConsoleBuffer (e opcionalmente mantém no stdout do servidor)."""
+    """Redirects ``print()`` to :class:`ConsoleBuffer` (optionally keeping server stdout)."""
     global _enabled
     if _enabled:
         return
@@ -45,7 +45,7 @@ def enable_web_print(echo_to_server_stdout: bool = True) -> None:
         end = kwargs.get("end", "\n")
         text = sep.join("" if a is None else str(a) for a in args) + end
 
-        # Import tardio para evitar ciclos
+        # Late import to avoid cycles
         from pyreact.core.hook import HookContext
         cb = HookContext.get_service("console_buffer", ConsoleBuffer)
         cb.write(text)

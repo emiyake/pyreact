@@ -9,9 +9,9 @@ def _escape(s: Any) -> str:
 
 
 def _style_to_str(v: Any) -> str:
-    """
-    Converte dict de estilo em string CSS.
-    Ex.: {"font_size":"14px","background-color":"#fff"} -> "font-size:14px;background-color:#fff"
+    """Convert a style dict to a CSS string.
+
+    Example: ``{"font_size":"14px","background-color":"#fff"} -> "font-size:14px;background-color:#fff"``
     """
     if isinstance(v, dict):
         parts = []
@@ -23,15 +23,15 @@ def _style_to_str(v: Any) -> str:
 
 
 def _attrs_to_str(props: Dict[str, Any]) -> str:
-    """
-    Converte props (exc. children/key/__internal) em atributos HTML.
-    Regras:
-      - class_ -> class
-      - data_xxx -> data-xxx
-      - aria_xxx -> aria-xxx
-      - style dict -> style="k:v;..."
-      - valores True -> atributo booleano (ex.: disabled)
-      - listas/tuplas -> ' '.join(...)
+    """Convert props (excluding children/key/__internal) into HTML attributes.
+
+    Rules:
+      - ``class_`` -> ``class``
+      - ``data_xxx`` -> ``data-xxx``
+      - ``aria_xxx`` -> ``aria-xxx``
+      - style dict -> ``style="k:v;..."``
+      - ``True`` values -> boolean attributes (e.g., ``disabled``)
+      - lists/tuples -> ``' '.join(...)``
     """
     if not props:
         return ""
@@ -43,7 +43,7 @@ def _attrs_to_str(props: Dict[str, Any]) -> str:
         if v is None:
             continue
 
-        # normalizações
+        # normalizations
         if k == "class_":
             k = "class"
         elif k.startswith("data_"):
@@ -51,13 +51,13 @@ def _attrs_to_str(props: Dict[str, Any]) -> str:
         elif k.startswith("aria_"):
             k = "aria-" + k[5:].replace("_", "-")
 
-        # valores
+        # values
         if isinstance(v, (list, tuple)):
             v = " ".join(map(str, v))
         elif k == "style":
             v = _style_to_str(v)
 
-        # booleanos como atributos sem valor
+        # booleans as valueless attributes
         if v is True:
             out.append(k)
             continue
@@ -72,24 +72,22 @@ def _attrs_to_str(props: Dict[str, Any]) -> str:
 def _render_node(ctx: HookContext) -> str:
     fn = ctx.component_fn
 
-    # Nó de texto (criado por web/html.t(...))
+    # Text node (created by ``web/html.t(...)``)
     if getattr(fn, "__is_text_node__", False):
         val = ctx.props.get("value", "")
         return _escape(val)
 
-    # Tag HTML
+    # HTML tag
     if getattr(fn, "__is_html_tag__", False):
         tag = getattr(fn, "__html_tag_name__", "div")
         attrs = _attrs_to_str(ctx.props)
         inner = "".join(_render_node(ch) for ch in ctx.children)
         return f"<{tag}{attrs}>{inner}</{tag}>"
 
-    # Componentes lógicos (Router, Route, etc.) são transparentes para o HTML
+    # Logical components (Router, Route, etc.) are transparent to HTML
     return "".join(_render_node(ch) for ch in ctx.children)
 
 
 def render_to_html(root_ctx: HookContext) -> str:
-    """
-    Renderiza a subárvore de 'root_ctx' (filhos) para uma string HTML.
-    """
+    """Render the subtree of ``root_ctx`` (its children) into an HTML string."""
     return "".join(_render_node(ch) for ch in root_ctx.children)

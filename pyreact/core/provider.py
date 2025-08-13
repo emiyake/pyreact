@@ -22,7 +22,7 @@ def provider(ctx_var, *, prop="value"):
             def cleanup():
                 ctx_var.reset(token)
 
-            # registra o cleanup – roda no próximo commit ou un-mount
+            # register the cleanup – runs on the next commit or unmount
             hooks.use_effect(lambda: cleanup, [value])
 
             return body_fn(**props)
@@ -40,7 +40,7 @@ def create_context(*, default=None, name="Context", prop="value"):
 
     class _Context:
 
-        # usados por use_context / unmount
+        # used by use_context / unmount
         _ctx  = ctx_var
         _subs = subs_set
 

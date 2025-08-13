@@ -18,10 +18,10 @@ from pyreact.web.console import ConsoleBuffer, enable_web_print, disable_web_pri
 
 
 # -------------------------
-# Estado do servidor
+# Server state
 # -------------------------
 _WS_CLIENTS: Set[WebSocket] = set()
-_pending_path: Optional[str] = None  # navegação pendente até Router montar
+_pending_path: Optional[str] = None  # pending navigation until Router mounts
 
 
 _BASE_HTML = """<!doctype html>
@@ -40,7 +40,7 @@ _BASE_HTML = """<!doctype html>
   <body>
     <pre id="stdout">{STDOUT}</pre>
     <div id="root">{SSR}</div>
-    <input id="cli" placeholder="digite e pressione Enter…" autofocus />
+    <input id="cli" placeholder="type and press Enter…" autofocus />
     <script>
       (function(){
         const proto = (location.protocol === 'https:') ? 'wss://' : 'ws://';
@@ -67,18 +67,18 @@ _BASE_HTML = """<!doctype html>
               pre.textContent += msg.text;
               return;
             }
-          } catch {
-            // compat: payload antigo puro HTML
-            document.getElementById('root').innerHTML = ev.data;
-          }
-        };
+            } catch {
+              // compatibility: legacy payload with raw HTML
+              document.getElementById('root').innerHTML = ev.data;
+            }
+          };
 
-        // Back/forward → servidor
+          // Back/forward → server
         window.addEventListener('popstate', () => {
           try { ws.send(JSON.stringify({t:'nav', path: location.pathname})); } catch {}
         });
 
-        // Campo de entrada (Keystroke → InputBus)
+          // Input field (Keystroke → InputBus)
         cli.addEventListener('input', (e) => {
           try { ws.send(JSON.stringify({t:'text', v: e.target.value})); } catch {}
         });
@@ -95,14 +95,13 @@ _BASE_HTML = """<!doctype html>
 
 
 def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
-    """
-    Cria a app FastAPI com ciclo de vida via 'lifespan'.
-    Retorna (app, root_ctx).
+    """Create the FastAPI app with lifecycle via ``lifespan``.
+    Returns ``(app, root_ctx)``.
     """
     app = FastAPI()
     root_ctx = HookContext(app_component_fn.__name__, app_component_fn)
 
-    # ---------- helpers locais (usam root_ctx) ----------
+    # ---------- local helpers (use root_ctx) ----------
 
     async def _broadcast_html(html_now: str) -> None:
         payload = json.dumps({"type": "html", "html": html_now})
@@ -138,26 +137,26 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             _WS_CLIENTS.discard(ws)
 
     async def _maybe_navigate(path: str) -> None:
-        """Chama Router.navigate(path) se disponível; senão, deixa pendente."""
+        """Call ``Router.navigate(path)`` if available; otherwise leave it pending."""
         global _pending_path
 
         if path == "/favicon.ico":
             return
         navsvc = HookContext.get_service("nav_service", lambda: {"subs": [], "navigate": None, "current": "/"})
         nav = navsvc.get("navigate")
-        if callable(nav):
-            if navsvc.get("current") != path:
-                nav(path)           # atualiza RouterContext
-                await run_renders()
-            _pending_path = None
-        else:
-            _pending_path = path   # Router ainda não montou
+            if callable(nav):
+              if navsvc.get("current") != path:
+                  nav(path)           # update RouterContext
+                  await run_renders()
+              _pending_path = None
+          else:
+              _pending_path = path   # Router not mounted yet
 
     async def _render_loop() -> None:
-        """Loop que aplica renders e envia HTML novo aos clientes."""
+        """Loop that applies renders and sends new HTML to clients."""
         prev_html = None
         while True:
-            # aplica navegação pendente (se Router já existir)
+            # apply pending navigation (if Router already exists)
             if _pending_path:
                 await _maybe_navigate(_pending_path)
 
@@ -166,22 +165,22 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             if html_now != prev_html:
                 prev_html = html_now
                 await _broadcast_html(html_now)
-            await asyncio.sleep(0.05)  # ~20 FPS máx
+            await asyncio.sleep(0.05)  # ~20 FPS max
 
     # ---------- lifespan (startup/shutdown) ----------
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # 1) Captura de print() → ConsoleBuffer
+        # 1) Capture print() → ConsoleBuffer
         enable_web_print(echo_to_server_stdout=True)
         console = HookContext.get_service("console_buffer", ConsoleBuffer)
 
-        # 2) Assinante que empurra stdout para os clientes
+        # 2) Subscriber that pushes stdout to clients
         def _on_console(text: str):
-            # estamos dentro do loop (startup), então pode agendar
+            # we're inside the loop (startup), so scheduling is safe
             asyncio.create_task(_broadcast_stdout(text))
         console.subscribe(_on_console)
 
-        # 3) Navegação programática (navigate(...) → browser pushState)
+        # 3) Programmatic navigation (navigate(...) → browser pushState)
         navsvc = HookContext.get_service("nav_service", lambda: {"subs": [], "navigate": None, "current": "/"})
         async def _nav_push(path: str):
             await _broadcast_nav(path)
@@ -189,11 +188,11 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             asyncio.create_task(_nav_push(path))
         navsvc["subs"].append(_nav_listener)
 
-        # 4) Primeira renderização será agendada agora que há event loop
+        # 4) First render will be scheduled now that there's an event loop
         schedule_rerender(root_ctx)
         render_task = asyncio.create_task(_render_loop())
 
-        # 5) SSR inicial já usará stdout acumulado até aqui
+        # 5) Initial SSR will already use stdout accumulated so far
         app.state._cleanup = {
             "console": console,
             "console_listener": _on_console,
@@ -220,22 +219,22 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                 pass
             disable_web_print()
 
-    # vincula lifespan
-    app.router.lifespan_context = lifespan  # FastAPI moderno aceita setar assim
+    # attach lifespan
+    app.router.lifespan_context = lifespan  # Modern FastAPI allows setting it like this
 
 
-    # ---------- rotas ----------
+    # ---------- routes ----------
     @app.get("/favicon.ico")
     async def favicon():
-        # Se quiser, retorne um ícone real com FileResponse(...).
-        # Aqui só evitamos SSR e troca de rota:
+        # Return a real icon with FileResponse(...) if desired.
+        # Here we just avoid SSR and a route change:
         return Response(status_code=204, media_type="image/x-icon")
 
     @app.get("/{full_path:path}")
     async def index(request: Request, full_path: str = ""):
         accept = request.headers.get("accept", "")
         if "text/html" not in accept.lower():
-            # Evita SSR para assets acidentais (como o favicon)
+            # Avoid SSR for accidental assets (like the favicon)
             return Response(status_code=204)
 
         path = "/" + full_path

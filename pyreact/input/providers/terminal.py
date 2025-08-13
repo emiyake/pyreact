@@ -9,9 +9,8 @@ def _emit_text_submit(bus: InputBus, txt: str):
     bus.emit({"type": "submit", "value": txt, "source": "term", "ts": now})
 
 class TerminalInput:
-    """
-    Leitor de terminal simples (linha por linha).
-    Para por-tecla, dá para implementar modo raw depois.
+    """Simple terminal reader (line by line).
+    For per-key input, raw mode can be implemented later.
     """
     def __init__(self, bus: InputBus, prompt: str = ">> "):
         self.bus = bus
@@ -34,3 +33,4 @@ class TerminalInput:
 
     def stop(self):
         self._stopping = True
+

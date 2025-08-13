@@ -2,24 +2,24 @@ import asyncio
 from typing import Optional
 
 
-# Estruturas globais, mas criadas sob demanda no loop correto
+# Global structures, created on demand in the correct loop
 # ------------------------------------------------------------
 rerender_queue: asyncio.Queue = asyncio.Queue()
 _enqueued: set = set()
 
-_render_idle: Optional[asyncio.Event] = None   # será criado on-demand
+_render_idle: Optional[asyncio.Event] = None   # will be created on demand
 
 
 def get_render_idle() -> asyncio.Event:
-    """Garante que o Event pertence ao loop que estiver rodando agora."""
+    """Ensure the ``Event`` belongs to the currently running loop."""
     global _render_idle
     if _render_idle is None:
         _render_idle = asyncio.Event()
-        _render_idle.set()          # começa no estado "ocioso"
+        _render_idle.set()          # start in the 'idle' state
     return _render_idle
 
 
-# API de scheduling / commit
+# scheduling / commit API
 # ------------------------------------------------------------
 def schedule_rerender(ctx):
     loop = asyncio.get_running_loop()
@@ -34,7 +34,7 @@ def schedule_rerender(ctx):
 
 
 async def run_renders() -> None:
-    from pyreact.core.hook import HookContext   # import aqui para evitar loop infinito
+    from pyreact.core.hook import HookContext   # import here to avoid infinite loop
 
     while not rerender_queue.empty():
         ctx: HookContext = await rerender_queue.get()
@@ -43,5 +43,5 @@ async def run_renders() -> None:
         await ctx.run_effects()
 
     if rerender_queue.empty():
-        get_render_idle().set()    # volta a ficar ocioso
+        get_render_idle().set()    # return to idle state
         
