@@ -19,7 +19,7 @@ class _InputDispatcher:
                         cb(txt.strip())
                     except Exception:
                         pass
-                # espera commits terminarem no *mesmo* loop
+                # wait for commits to finish on the same loop
                 await get_render_idle().wait()
                 
         finally:
