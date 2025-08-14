@@ -21,6 +21,7 @@ class TerminalInput:
     async def _runner(self):
         loop = asyncio.get_running_loop()
         while not self._stopping:
+            await asyncio.sleep(0.3)
             txt = await loop.run_in_executor(None, input, self.prompt)
             _emit_text_submit(self.bus, txt)
             if txt.strip() in ("exit", "quit"):

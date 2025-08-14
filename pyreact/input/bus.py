@@ -10,18 +10,14 @@ Subscriber = Callable[[Event], None]
 
 class InputBus:
     """Input bus (thread-safe enough for use with ``asyncio``)."""
-    def __init__(self) -> None:
-        self._subs: List[Subscriber] = []
-
-    def subscribe(self, fn: Subscriber) -> None:
+    def __init__(self): self._subs: list[Subscriber] = []
+    def subscribe(self, fn: Subscriber):
         if fn not in self._subs:
             self._subs.append(fn)
-
-    def unsubscribe(self, fn: Subscriber) -> None:
-        try:
-            self._subs.remove(fn)
-        except ValueError:
-            pass
+        def unsubscribe():
+            try: self._subs.remove(fn)
+            except ValueError: pass
+        return unsubscribe
 
     def emit(self, ev: Event) -> None:
         for fn in list(self._subs):

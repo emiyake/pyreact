@@ -11,7 +11,6 @@ def run_terminal(app_component_fn, *, fps: int = 20, prompt: str = ">> "):
 
         bus = HookContext.get_service("input_bus", InputBus)
         TerminalInput(bus, prompt=prompt).start()
-
         try:
             interval = 1.0 / max(1, fps)
             while True:
