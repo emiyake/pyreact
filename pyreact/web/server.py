@@ -144,13 +144,13 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             return
         navsvc = HookContext.get_service("nav_service", lambda: {"subs": [], "navigate": None, "current": "/"})
         nav = navsvc.get("navigate")
-            if callable(nav):
-              if navsvc.get("current") != path:
-                  nav(path)           # update RouterContext
-                  await run_renders()
-              _pending_path = None
-          else:
-              _pending_path = path   # Router not mounted yet
+        if callable(nav):
+            if navsvc.get("current") != path:
+                nav(path)           # update RouterContext
+                await run_renders()
+            _pending_path = None
+        else:
+            _pending_path = path   # Router not mounted yet
 
     async def _render_loop() -> None:
         """Loop that applies renders and sends new HTML to clients."""
