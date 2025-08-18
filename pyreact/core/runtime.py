@@ -28,8 +28,8 @@ def schedule_rerender(ctx):
         return
     _enqueued.add(ctx)
 
-    idle = get_render_idle()
-    idle.clear()
+    # idle = get_render_idle()
+    # idle.clear()
 
     loop.call_soon_threadsafe(rerender_queue.put_nowait, ctx)
 
@@ -43,6 +43,6 @@ async def run_renders() -> None:
         ctx.render()
         await ctx.run_effects()
 
-    if rerender_queue.empty():
-        get_render_idle().set()    # return to idle state
+    if rerender_queue.empty():        
+        get_render_idle().set() 
         

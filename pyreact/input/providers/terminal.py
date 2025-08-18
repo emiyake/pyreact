@@ -1,6 +1,7 @@
 import asyncio
 import time
 from typing import Optional
+from pyreact.core.runtime import get_render_idle
 from pyreact.input.bus import InputBus
 
 def _emit_text_submit(bus: InputBus, txt: str):
@@ -21,12 +22,15 @@ class TerminalInput:
     async def _runner(self):
         loop = asyncio.get_running_loop()
         while not self._stopping:
-            await asyncio.sleep(0.3)
             txt = await loop.run_in_executor(None, input, self.prompt)
             _emit_text_submit(self.bus, txt)
+            
             if txt.strip() in ("exit", "quit"):
                 self._stopping = True
                 break
+            
+            await asyncio.sleep(0.1)
+            await get_render_idle().wait()
 
     def start(self):
         if self._task is None:

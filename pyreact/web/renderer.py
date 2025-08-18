@@ -1,3 +1,4 @@
+# pyreact/web/renderer.py
 from typing import Any, Dict
 import html as _htmllib
 
