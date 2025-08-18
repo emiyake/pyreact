@@ -11,7 +11,6 @@ import dspy
 
 import os
 
-os.environ["OPENAI_API_KEY"] = "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"
 
 UserContext = create_context(default="anonymous", name="User")
 
