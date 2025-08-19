@@ -1,6 +1,6 @@
 import asyncio
 from pyreact.core.hook import HookContext
-from pyreact.core.runtime import get_render_idle, run_renders, schedule_rerender
+from pyreact.core.runtime import run_renders, schedule_rerender
 from pyreact.input.bus import InputBus
 from pyreact.input.providers.terminal import TerminalInput
 

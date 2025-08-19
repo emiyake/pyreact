@@ -6,10 +6,16 @@ from pyreact.boot import run_terminal, run_web
 from pyreact.components.keystroke import Keystroke
 from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
-from pyreact.router import Route, Router, use_route
+from pyreact.router import Route, Router, use_route, use_navigate, use_query_params
 import dspy
 
 import os
+
+from pyreact.router.route import use_route_params
+from pyreact.web.nav_service import NavService
+
+
+OPENAI_API_KEY = "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"
 
 
 UserContext = create_context(default="anonymous", name="User")
@@ -54,6 +60,8 @@ def GuardRail(question, children):
       return
     check_toxicity(comment=question)
 
+  path, navigate = use_route()
+
   hooks.use_effect(_check_toxicity, [question])
   hooks.use_effect(lambda: set_ver(result_toxicity[1] if result_toxicity else 0), [result_toxicity])
 
@@ -66,7 +74,9 @@ def GuardRail(question, children):
 
 
   if getattr(result_toxicity[0], "toxic", False):
-    return [Print(key=f"toxic-{result_toxicity[1]}", text="A pergunta é considerada tóxica")]
+    navigate("/home/3")
+    return []
+    return [Print(key=f"toxic-{result_toxicity[1]}", text="The question is considered toxic")]
   else:
     return children
 
@@ -89,40 +99,27 @@ def QAAgent(question: str):
   if result is None:
     return []
 
-
-
   return [Print(key="agent", text=f"Response: {getattr(result[0], 'answer', None)}")]
 
 
 @component
 def QAHome():
-  qa_mod = use_dspy_module(ConvertDates, dspy.Predict, name="qa-cot")
-  call_dspy, result, loading, error = use_dspy_call(qa_mod)
+  last_message, set_last_message = hooks.use_state("")
 
-  last_q, set_last_q = hooks.use_state("")
+  print("QA Home")
 
   def on_enter(line: str):
-      # dispara inferência ao teclar Enter
       if not line.strip():
           return
-      set_last_q(line)
-      # call_dspy(sentence=line)
+      set_last_message(line)
 
-
-  # Derivações simples do resultado/erro
-  answer = getattr(result, "answer", None) if result is not None else None
-  err    = str(error) if error else None
-
-  # UI: um input de terminal + logs reativos
-  children = [
+  return [
       Print(key="hint", text="Digite sua pergunta e pressione Enter…"),
-      Keystroke(key="qa_input", path="/qa", exclusive=True, on_submit=on_enter),
-      GuardRail(key="guardrail", question=last_q, children=[
-        QAAgent(key="agent", question=last_q)
+      Keystroke(key="qa_input", on_submit=on_enter),
+      GuardRail(key="guardrail", question=last_message, children=[
+        QAAgent(key="agent", question=last_message)
       ])
   ]
-
-  return children
 
 @component
 def Text(text: str):
@@ -142,11 +139,56 @@ def Link(to, label):
 
 @component
 def Home():
-    return [Text(key="h", text="🏠 Home")]
+    route_params = use_route_params()
+    query_params = use_query_params()
+    navigate = use_navigate()
+    
+    print("Route params:", route_params)
+    print("Query params:", query_params)
+    
+    def handle_navigate_with_params(k):
+        if k == "p":  # Press 'p' to navigate with parameters
+            navigate("/home/456", params={"id": "457"}, query={"tab": "profile", "edit": "true"})
+        elif k == "a": 
+            navigate("/about")
+        elif k == "d":  # Press 'd' to navigate using dict format
+            navigate({
+                "path": "/home/:id",
+                "params": {"id": "789"},
+                "query": {"mode": "debug", "level": "info"},
+                "fragment": "section1"
+            })
+    
+    id_text = f" (ID: {route_params.get('id', 'none')})" if route_params.get('id') else ""
+    query_text = f" Query: {query_params}" if query_params else ""
+
+    hooks.use_effect(lambda: lambda: print("Home unmounted"), [])
+    
+    return [
+        Text(key="h", text=f"🏠 Home{id_text}{query_text}"),
+        Text(key="help", text="Press 'p' for params, 'a' for about, 'd' for dict navigation"),
+        Keystroke(key="nav", on_submit=handle_navigate_with_params)
+    ]
 
 @component
 def About():
-    return [Text(key="a", text="ℹ️  About")]
+    query_params = use_query_params()
+    navigate = use_navigate()
+    
+    def handle_navigation(k):
+        if k == "h":  # Navigate to home with parameters
+            navigate("/home/about-redirect", query={"from": "about"})
+        elif k == "s":  # Add search query
+            navigate("/about", query={"search": "documentation", "filter": "recent"})
+    
+    search_text = f" (Search: {query_params.get('search', 'none')})" if query_params.get('search') else ""
+    filter_text = f" Filter: {query_params.get('filter', 'none')}" if query_params.get('filter') else ""
+    
+    return [
+        Text(key="a", text=f"ℹ️  About{search_text}{filter_text}"),
+        Text(key="help2", text="Press 'h' to go home with params, 's' to add search query"),
+        Keystroke(key="about-nav", on_submit=handle_navigation)
+    ]
 
 @component
 def NotFound():
@@ -154,12 +196,13 @@ def NotFound():
 
 @component
 def App():
+    navsvc = hooks.get_service("nav_service", NavService)
     return [
         Router(
-            initial="/qa",
+            initial="/home/1",
             children=[
-                Route(key="r1", path="/home",      children=[Home(key="home")]),
-                Route(key="r2", path="/hiring",     children=[About(key="hiring")]),
+                Route(key="r1", path="/home/:id",      children=[Home(key="home")]),
+                Route(key="r2", path="/about",     children=[About(key="about")]),
                 Route(key="r3", path="/qa",        children=[QAHome(key="qa")]),
             ],
         )
@@ -167,10 +210,7 @@ def App():
 
 @component
 def Root():
-    # Configure seu LM uma única vez
-    # Exemplo: dspy.settings.configure(lm=...) também funciona;
-    # aqui passo via Provider para ficar explícito.
-    lm = dspy.LM("openai/gpt-4o-mini")
+    lm = dspy.LM("openai/gpt-4o-mini", api_key=OPENAI_API_KEY)
     return [DSPyProvider(key="dspy", lm=lm, children=[App(key="app")])]
 
 if __name__ == "__main__":

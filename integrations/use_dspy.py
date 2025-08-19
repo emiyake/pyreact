@@ -6,8 +6,8 @@ from pyreact.core.core import hooks
 
 def use_dspy_call(module) -> tuple[Callable[..., None], object, bool, Optional[Exception]]:
     """
-    Política: replace (a última chamada vence).
-    Retorna (run, result, loading, error). Força atualização a cada sucesso via 'ver'.
+    Policy: replace (the last call wins).
+    Returns (run, result, loading, error). Forces an update after each success via 'ver'.
     """
     # ---------------- Reducer ----------------
     def reducer(state, action):
@@ -23,7 +23,7 @@ def use_dspy_call(module) -> tuple[Callable[..., None], object, bool, Optional[E
     initial = {"status": "idle", "result": None, "error": None, "ver": 0}
     state, dispatch = hooks.use_reducer(reducer, initial)
 
-    # -------------- “Refs” estáveis --------------
+    # -------------- Stable refs --------------
     alive_ref = hooks.use_memo(lambda: {"alive": True}, [])
     task_ref  = hooks.use_memo(lambda: {"task": None}, [])
 
@@ -32,7 +32,7 @@ def use_dspy_call(module) -> tuple[Callable[..., None], object, bool, Optional[E
         return _un
     hooks.use_effect(_mount_cleanup, [])
 
-    # -------------- Worker assíncrono --------------
+    # -------------- Async worker --------------
     async def _do_call(inputs: dict):
         current_task = asyncio.current_task()
 
@@ -47,7 +47,7 @@ def use_dspy_call(module) -> tuple[Callable[..., None], object, bool, Optional[E
             if alive_ref["alive"] and task_ref["task"] is current_task:
                 dispatch({"type": "error", "error": e, "ver": ver})
 
-    # -------------- API exposta --------------
+    # -------------- Exposed API --------------
     def _run(**inputs):
         dispatch({"type": "start"})
         t = asyncio.create_task(_do_call(inputs))

@@ -31,6 +31,7 @@ def DSPyProvider(*, lm, optimizer=None, settings=None, children=None):
         lambda: DSPyEnv(lm=lm, optimizer=optimizer, settings=settings or {}),
         deps=[lm, optimizer, tuple(sorted((settings or {}).items()))]
     )
+    dspy.configure(lm=env.lm)
     # expose the environment via Context
     return [DSPyContext(value=env, children=children or [])]
 
@@ -54,13 +55,10 @@ def use_dspy_module(
     deps_key = tuple(deps) if deps is not None else None
     module_key = _mk_module_key(module_cls, signature, name)
 
+
+
     def factory():
-        # 1) create the raw module
         mod = module_cls(signature)
-        # 2) attach Provider's LM (when applicable)
-        # Many DSPy modules read the global LM via dspy.settings; if preferred, force here:
-        dspy.settings.configure(lm=env.lm)
-        # 3) cache it
         env.caches[module_key] = mod
         return mod
 

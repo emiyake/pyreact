@@ -14,17 +14,17 @@ __all__ = [
 
 
 # -----------------------------------------------------------------------------
-# ConsoleBuffer (singleton) com ring buffer
+# ConsoleBuffer (singleton) with ring buffer
 # -----------------------------------------------------------------------------
 class ConsoleBuffer:
     """
-    Buffer de console com ring buffer por número de caracteres.
+    Console buffer with a character-count ring buffer.
 
-    - `append(text)` adiciona texto ao final e mantém o total <= max_chars.
-    - `dump()` retorna todo o conteúdo atual (concatenação dos chunks).
-    - `subscribe(cb)`/`unsubscribe(cb)` registram callbacks chamados em cada append.
-    - Implementado como SINGLETON para ser compartilhado entre o servidor e o hook
-      que intercepta stdout/stderr.
+    - `append(text)` adds text to the end and keeps the total <= max_chars.
+    - `dump()` returns the entire current content (concatenation of chunks).
+    - `subscribe(cb)`/`unsubscribe(cb)` register callbacks invoked on each append.
+    - Implemented as a SINGLETON to be shared between the server and the hook
+      that intercepts stdout/stderr.
     """
 
     _instance: Optional["ConsoleBuffer"] = None
@@ -35,7 +35,7 @@ class ConsoleBuffer:
         return cls._instance
 
     def __init__(self, max_chars: int = 200_000) -> None:
-        # Evitar re-inicialização no singleton
+        # Avoid re-initialization in the singleton
         if getattr(self, "_initialized", False):
             return
 
@@ -61,18 +61,18 @@ class ConsoleBuffer:
             self._length += len(text)
             self._trim_left_until_within_limit()
 
-        # Notificar assinantes FORA do lock, para evitar deadlocks
+        # Notify subscribers OUTSIDE the lock to avoid deadlocks
         for cb in list(self._subs):
             try:
                 cb(text)
             except Exception:
-                # Não interromper o fluxo por erro de callbacks
+                # Do not break the flow due to subscriber errors
                 pass
 
-    # ---------------- API pública ----------------
+    # ---------------- Public API ----------------
     def dump(self) -> str:
         with self._lock:
-            # join é O(n), mas amortizado e aceitável para páginas moderadas
+            # join is O(n), but amortized and acceptable for moderate pages
             return "".join(self._chunks)
 
     def length(self) -> int:
@@ -98,7 +98,7 @@ class ConsoleBuffer:
 
 
 # -----------------------------------------------------------------------------
-# Redirecionamento de stdout/stderr
+# Redirection of stdout/stderr
 # -----------------------------------------------------------------------------
 _original_stdout = None
 _original_stderr = None
@@ -107,36 +107,36 @@ _patched = False
 
 class _WebStream:
     """
-    File-like que duplica writes:
-      - opcionalmente ecoa no stream original (para logs do servidor)
-      - sempre escreve no ConsoleBuffer singleton
+    File-like that duplicates writes:
+      - optionally echoes to the original stream (for server logs)
+      - always writes to the ConsoleBuffer singleton
     """
 
     def __init__(self, console: ConsoleBuffer, original, echo: bool) -> None:
         self._console = console
         self._original = original
         self._echo = bool(echo)
-        # Expor encoding para compatibilidade com objetos de arquivo
+        # Expose encoding for compatibility with file-like objects
         self.encoding = getattr(original, "encoding", "utf-8")
 
     def write(self, s: str) -> int:
-        # Ecoar no original (se habilitado)
+        # Echo to the original stream (if enabled)
         if self._echo and self._original is not None:
             try:
                 self._original.write(s)
             except Exception:
-                # Ignore erros do stream original para não quebrar a captura
+                # Ignore errors from the original stream to avoid breaking capture
                 pass
             try:
                 self._original.flush()
             except Exception:
                 pass
 
-        # Sempre enviar ao buffer web
+        # Always send to the web buffer
         try:
             self._console.append(s)
         except Exception:
-            # Nunca deixar a aplicação cair por erro no buffer
+            # Never let the application crash due to buffer errors
             pass
         return len(s)
 
@@ -147,7 +147,7 @@ class _WebStream:
             except Exception:
                 pass
 
-    # Compatibilidade básica com APIs de arquivo
+    # Basic compatibility with file-like APIs
     def isatty(self) -> bool:  # type: ignore[override]
         return False
 
@@ -160,18 +160,18 @@ class _WebStream:
 
 def enable_web_print(*, echo_to_server_stdout: bool = True, max_chars: Optional[int] = None) -> None:
     """
-    Redireciona `sys.stdout` e `sys.stderr` para o ConsoleBuffer singleton,
-    com opção de também escrever nos streams originais do servidor.
+    Redirects `sys.stdout` and `sys.stderr` to the ConsoleBuffer singleton,
+    with an option to also write to the server's original streams.
 
-    - `echo_to_server_stdout=True`: mantém logs no terminal/uvicorn.
-    - `max_chars`: opcionalmente altera o tamanho do ring buffer neste momento.
+    - `echo_to_server_stdout=True`: keeps logs in the terminal/uvicorn.
+    - `max_chars`: optionally changes the ring buffer size at this time.
 
-    Chamadas múltiplas são idempotentes.
+    Multiple calls are idempotent.
     """
     global _original_stdout, _original_stderr, _patched
 
     if _patched:
-        # Permitir reconfigurar o tamanho do buffer mesmo já estando ativo
+        # Allow reconfiguring the buffer size even when already active
         if max_chars is not None:
             ConsoleBuffer().set_max_chars(int(max_chars))
         return
@@ -191,8 +191,8 @@ def enable_web_print(*, echo_to_server_stdout: bool = True, max_chars: Optional[
 
 def disable_web_print() -> None:
     """
-    Restaura `sys.stdout` e `sys.stderr` originais.
-    Silencioso se já estiver desabilitado.
+    Restores the original `sys.stdout` and `sys.stderr`.
+    No-op if already disabled.
     """
     global _original_stdout, _original_stderr, _patched
 

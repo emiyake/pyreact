@@ -40,8 +40,10 @@ async def run_renders() -> None:
     while not rerender_queue.empty():
         ctx: HookContext = await rerender_queue.get()
         _enqueued.discard(ctx)
-        ctx.render()
-        await ctx.run_effects()
+        # Skip rendering if the context has been unmounted since it was enqueued
+        if getattr(ctx, "_mounted", True):
+            ctx.render()
+            await ctx.run_effects()
 
     if rerender_queue.empty():        
         get_render_idle().set() 

@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 
 from pyreact.core.hook import HookContext
 from pyreact.core.runtime import schedule_rerender, run_renders
+from pyreact.web.nav_service import NavService
 from pyreact.web.renderer import render_to_html
 from pyreact.input.bus import InputBus
 from pyreact.web.console import ConsoleBuffer, enable_web_print, disable_web_print
@@ -137,20 +138,23 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             _WS_CLIENTS.discard(ws)
 
     async def _maybe_navigate(path: str) -> None:
-        """Call ``Router.navigate(path)`` if available; otherwise leave it pending."""
         global _pending_path
-
         if path == "/favicon.ico":
             return
-        navsvc = HookContext.get_service("nav_service", lambda: {"subs": [], "navigate": None, "current": "/"})
-        nav = navsvc.get("navigate")
+
+        navsvc = HookContext.get_service("nav_service", NavService)
+        nav = navsvc.navigate
         if callable(nav):
-            if navsvc.get("current") != path:
-                nav(path)           # update RouterContext
+            if navsvc.current != path:
+                # Update RouterContext
+                nav(path)
                 await run_renders()
             _pending_path = None
         else:
-            _pending_path = path   # Router not mounted yet
+            # Router has not mounted yet
+            navsvc.current = path
+            _pending_path = path
+
 
     async def _render_loop() -> None:
         """Loop that applies renders and sends new HTML to clients."""
@@ -170,29 +174,29 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
     # ---------- lifespan (startup/shutdown) ----------
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # 1) Capture print() → ConsoleBuffer
+        # 1. Capture print() → ConsoleBuffer
         enable_web_print(echo_to_server_stdout=True)
         console = HookContext.get_service("console_buffer", ConsoleBuffer)
 
-        # 2) Subscriber that pushes stdout to clients
+        # 2. Subscriber that pushes stdout to clients
         def _on_console(text: str):
             # we're inside the loop (startup), so scheduling is safe
             asyncio.create_task(_broadcast_stdout(text))
         console.subscribe(_on_console)
 
-        # 3) Programmatic navigation (navigate(...) → browser pushState)
-        navsvc = HookContext.get_service("nav_service", lambda: {"subs": [], "navigate": None, "current": "/"})
+        # 3. Programmatic navigation (navigate(...) → browser pushState)
+        navsvc = HookContext.get_service("nav_service", NavService)
         async def _nav_push(path: str):
             await _broadcast_nav(path)
         def _nav_listener(path: str):
             asyncio.create_task(_nav_push(path))
-        navsvc["subs"].append(_nav_listener)
+        navsvc.subs.append(_nav_listener)
 
-        # 4) First render will be scheduled now that there's an event loop
+        # 4. First render will be scheduled now that there's an event loop
         schedule_rerender(root_ctx)
         render_task = asyncio.create_task(_render_loop())
 
-        # 5) Initial SSR will already use stdout accumulated so far
+        # 5. Initial SSR will already use stdout accumulated so far
         app.state._cleanup = {
             "console": console,
             "console_listener": _on_console,
@@ -210,7 +214,7 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             except Exception:
                 pass
             try:
-                navsvc["subs"].remove(_nav_listener)
+                navsvc.subs.remove(_nav_listener)
             except Exception:
                 pass
             try:
