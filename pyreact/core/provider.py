@@ -5,12 +5,12 @@ from weakref import WeakSet
 from pyreact.core.core import component, hooks
 from pyreact.core.runtime import schedule_rerender
 
+
 def provider(ctx_var, *, prop="value"):
     def decorator(body_fn):
         @component
         @wraps(body_fn)
         def wrapper(*, key=None, **props):
-
             try:
                 value = props.pop(prop)
             except KeyError:
@@ -27,20 +27,21 @@ def provider(ctx_var, *, prop="value"):
             return body_fn(**props)
 
         return wrapper
+
     return decorator
 
+
 def create_context(*, default=None, name="Context", prop="value"):
-    ctx_var   = ContextVar(name, default=default)
-    subs_set  = WeakSet()
+    ctx_var = ContextVar(name, default=default)
+    subs_set = WeakSet()
 
     @provider(ctx_var, prop=prop)
     def _Provider(**props):
         return props.get("children", [])
 
     class _Context:
-
         # used by use_context / unmount
-        _ctx  = ctx_var
+        _ctx = ctx_var
         _subs = subs_set
 
         @staticmethod

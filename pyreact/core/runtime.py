@@ -8,7 +8,7 @@ from typing import Optional
 rerender_queue: asyncio.Queue = asyncio.Queue()
 _enqueued: set = set()
 
-_render_idle: Optional[asyncio.Event] = None   # will be created on demand
+_render_idle: Optional[asyncio.Event] = None  # will be created on demand
 
 
 def get_render_idle() -> asyncio.Event:
@@ -16,7 +16,7 @@ def get_render_idle() -> asyncio.Event:
     global _render_idle
     if _render_idle is None:
         _render_idle = asyncio.Event()
-        _render_idle.set()          # start in the 'idle' state
+        _render_idle.set()  # start in the 'idle' state
     return _render_idle
 
 
@@ -35,7 +35,7 @@ def schedule_rerender(ctx):
 
 
 async def run_renders() -> None:
-    from pyreact.core.hook import HookContext   # import here to avoid infinite loop
+    from pyreact.core.hook import HookContext  # import here to avoid infinite loop
 
     while not rerender_queue.empty():
         ctx: HookContext = await rerender_queue.get()
@@ -45,6 +45,5 @@ async def run_renders() -> None:
             ctx.render()
             await ctx.run_effects()
 
-    if rerender_queue.empty():        
-        get_render_idle().set() 
-        
+    if rerender_queue.empty():
+        get_render_idle().set()

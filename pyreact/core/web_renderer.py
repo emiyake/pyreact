@@ -1,8 +1,10 @@
 import html as _htmllib
 from .hook import HookContext  # HookContext
 
+
 def _escape(s: str) -> str:
     return _htmllib.escape(s, quote=True)
+
 
 def _attrs_to_str(props: dict) -> str:
     if not props:
@@ -27,6 +29,7 @@ def _attrs_to_str(props: dict) -> str:
     parts = [f'{k}="{_escape(str(v))}"' for k, v in norm.items()]
     return " " + " ".join(parts)
 
+
 def _render_node(ctx: HookContext) -> str:
     fn = ctx.component_fn
 
@@ -45,7 +48,7 @@ def _render_node(ctx: HookContext) -> str:
     # logical component (Router, Route, etc.) — transparent
     return "".join(_render_node(ch) for ch in ctx.children)
 
+
 def render_to_html(root_ctx: HookContext) -> str:
     # render only the children of the root (root is the App)
     return "".join(_render_node(ch) for ch in root_ctx.children)
-

@@ -6,14 +6,19 @@ from pyreact.web.nav_service import NavService
 
 RouterContext = create_context(default={"/": None}, name="Router")
 
-def _build_url(path: str, params: Optional[Dict[str, Any]] = None, 
-               query: Optional[Dict[str, Any]] = None, fragment: str = "") -> str:
+
+def _build_url(
+    path: str,
+    params: Optional[Dict[str, Any]] = None,
+    query: Optional[Dict[str, Any]] = None,
+    fragment: str = "",
+) -> str:
     """Build a URL with path parameters and query string"""
     # Replace path parameters like :id with actual values
     if params:
         for key, value in params.items():
             path = path.replace(f":{key}", str(value))
-    
+
     # Build query string
     query_string = ""
     if query:
@@ -21,24 +26,28 @@ def _build_url(path: str, params: Optional[Dict[str, Any]] = None,
         clean_query = {k: str(v) for k, v in query.items() if v is not None}
         if clean_query:
             query_string = urlencode(clean_query)
-    
+
     # Combine everything
     parsed = urlparse(path)
-    result = urlunparse((
-        parsed.scheme,
-        parsed.netloc, 
-        parsed.path,
-        parsed.params,
-        query_string,
-        fragment
-    ))
-    
+    result = urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            query_string,
+            fragment,
+        )
+    )
+
     return result
 
+
 def use_route():
-    state = hooks.use_context(RouterContext)     # e.g. {'/home': navigate}
-    (path, navigate), = state.items()
+    state = hooks.use_context(RouterContext)  # e.g. {'/home': navigate}
+    ((path, navigate),) = state.items()
     return path, navigate
+
 
 @component
 def Router(*, initial=None, children):
@@ -48,27 +57,35 @@ def Router(*, initial=None, children):
 
     # Force Router to rerender on nav changes so selected Route updates
     _version, _set_version = hooks.use_state(0)
+
     def _on_nav(_):
         _set_version(lambda v: v + 1)
+
     _nav_handler = hooks.use_memo(lambda: _on_nav, [])
+
     def _effect_subscribe():
         navsvc.subs.append(_nav_handler)
+
         def _cleanup():
             try:
                 navsvc.subs.remove(_nav_handler)
             except ValueError:
                 pass
+
         return _cleanup
+
     hooks.use_effect(_effect_subscribe, [_nav_handler, navsvc])
 
     def make_state(p, svc):
-        def navigate(new_path: Union[str, Dict[str, Any]], 
-                    params: Optional[Dict[str, Any]] = None,
-                    query: Optional[Dict[str, Any]] = None,
-                    fragment: str = ""):
+        def navigate(
+            new_path: Union[str, Dict[str, Any]],
+            params: Optional[Dict[str, Any]] = None,
+            query: Optional[Dict[str, Any]] = None,
+            fragment: str = "",
+        ):
             """
             Navigate to a new path with optional parameters and query string.
-            
+
             Args:
                 new_path: Either a string path or a dict with 'path', 'params', 'query', 'fragment'
                 params: Path parameters to replace in the URL (e.g., {'id': 123})
@@ -77,17 +94,16 @@ def Router(*, initial=None, children):
             """
             if isinstance(new_path, dict):
                 # If new_path is a dict, extract components
-                path_str = new_path.get('path', '/')
-                params = new_path.get('params', params)
-                query = new_path.get('query', query) 
-                fragment = new_path.get('fragment', fragment)
+                path_str = new_path.get("path", "/")
+                params = new_path.get("params", params)
+                query = new_path.get("query", query)
+                fragment = new_path.get("fragment", fragment)
             else:
                 path_str = new_path
-            
+
             # Build the final URL with parameters and query string
             final_url = _build_url(path_str, params, query, fragment)
-            
-            
+
             RouterContext.set({final_url: navigate})
             svc.current = final_url
             for fn in list(svc.subs):
@@ -95,6 +111,7 @@ def Router(*, initial=None, children):
                     fn(final_url)
                 except Exception:
                     pass
+
         svc.current = p
         svc.navigate = navigate
         return {p: navigate}
@@ -116,6 +133,7 @@ def Router(*, initial=None, children):
     # Only render the first matching <Route> child
     def _matches(path_pattern: str, s: str, exact: bool) -> bool:
         import re
+
         # explicit regex
         if path_pattern.startswith("^"):
             return re.match(path_pattern, s) is not None
@@ -130,7 +148,7 @@ def Router(*, initial=None, children):
                     j = i + 1
                     while j < len(pat) and (pat[j].isalnum() or pat[j] == "_"):
                         j += 1
-                    name = pat[i+1:j] or "param"
+                    name = pat[i + 1 : j] or "param"
                     tokens.append(f"(?P<{name}>[^/]+)")
                     i = j
                 elif c == "*" and i == len(pat) - 1:  # splat at end
@@ -171,4 +189,3 @@ def Router(*, initial=None, children):
     selected_children = [] if selected_child is None else [selected_child]
 
     return [RouterContext(value=router_value, children=selected_children)]
-

@@ -1,23 +1,44 @@
 import asyncio
 from collections.abc import Callable
-from typing import Optional
+from typing import Optional, Any
 import inspect
+import dspy
 from pyreact.core.core import hooks
+from integrations.dspy_integration import use_dspy_env
 
-def use_dspy_call(module) -> tuple[Callable[..., None], object, bool, Optional[Exception]]:
+
+def use_dspy_call(
+    module, *, model: Optional[str] = None, lm: Optional[Any] = None
+) -> tuple[Callable[..., None], object, bool, Optional[Exception]]:
     """
     Policy: replace (the last call wins).
     Returns (run, result, loading, error). Forces an update after each success via 'ver'.
     """
+
     # ---------------- Reducer ----------------
     def reducer(state, action):
         typ = action["type"]
         if typ == "start":
-            return {"status": "loading", "result": state["result"], "error": None, "ver": state["ver"]}
+            return {
+                "status": "loading",
+                "result": state["result"],
+                "error": None,
+                "ver": state["ver"],
+            }
         if typ == "success":
-            return {"status": "idle", "result": action["result"], "error": None, "ver": action["ver"]}
+            return {
+                "status": "idle",
+                "result": action["result"],
+                "error": None,
+                "ver": action["ver"],
+            }
         if typ == "error":
-            return {"status": "idle", "result": state["result"], "error": action["error"], "ver": action["ver"]}
+            return {
+                "status": "idle",
+                "result": state["result"],
+                "error": action["error"],
+                "ver": action["ver"],
+            }
         return state
 
     initial = {"status": "idle", "result": None, "error": None, "ver": 0}
@@ -25,11 +46,16 @@ def use_dspy_call(module) -> tuple[Callable[..., None], object, bool, Optional[E
 
     # -------------- Stable refs --------------
     alive_ref = hooks.use_memo(lambda: {"alive": True}, [])
-    task_ref  = hooks.use_memo(lambda: {"task": None}, [])
+    task_ref = hooks.use_memo(lambda: {"task": None}, [])
+    # Capture DSPy environment once during render (hooks-safe)
+    env = use_dspy_env()
 
     def _mount_cleanup():
-        def _un(): alive_ref["alive"] = False
+        def _un():
+            alive_ref["alive"] = False
+
         return _un
+
     hooks.use_effect(_mount_cleanup, [])
 
     # -------------- Async worker --------------
@@ -37,11 +63,36 @@ def use_dspy_call(module) -> tuple[Callable[..., None], object, bool, Optional[E
         current_task = asyncio.current_task()
 
         try:
-          ver = id(inspect.currentframe())
-          result = await module.acall(**inputs), ver
+            ver = id(inspect.currentframe())
+            # Determine LM to use for this call
+            selected_lm = env.lm
+            if lm is not None:
+                selected_lm = lm
+            elif model is not None:
+                selected_lm = env.models.get(model, env.models.get("default", env.lm))
 
-          if alive_ref["alive"] and task_ref["task"] is current_task:
-              dispatch({"type": "success", "result": result, "ver": ver})
+            # Run the module call under the chosen LM context
+            async def _call():
+                with dspy.context(lm=selected_lm):
+                    acall = getattr(module, "acall", None)
+                    if acall is not None and inspect.iscoroutinefunction(acall):
+                        return await acall(**inputs)
+                    apredict = getattr(module, "apredict", None)
+                    if apredict is not None and inspect.iscoroutinefunction(apredict):
+                        return await apredict(**inputs)
+                    predict = getattr(module, "predict", None)
+                    if callable(predict):
+                        return await asyncio.to_thread(predict, **inputs)
+                    if callable(module):
+                        return await asyncio.to_thread(module, **inputs)
+                    raise AttributeError(
+                        "DSPy module has no acall/apredict/predict/__call__ to invoke"
+                    )
+
+            result = await _call(), ver
+
+            if alive_ref["alive"] and task_ref["task"] is current_task:
+                dispatch({"type": "success", "result": result, "ver": ver})
 
         except Exception as e:
             if alive_ref["alive"] and task_ref["task"] is current_task:

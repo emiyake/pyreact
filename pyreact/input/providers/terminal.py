@@ -4,15 +4,18 @@ from typing import Optional
 from pyreact.core.runtime import get_render_idle
 from pyreact.input.bus import InputBus
 
+
 def _emit_text_submit(bus: InputBus, txt: str):
     now = time.time()
     bus.emit({"type": "text", "value": txt, "source": "term", "ts": now})
     bus.emit({"type": "submit", "value": txt, "source": "term", "ts": now})
 
+
 class TerminalInput:
     """Simple terminal reader (line by line).
     For per-key input, raw mode can be implemented later.
     """
+
     def __init__(self, bus: InputBus, prompt: str = ">> "):
         self.bus = bus
         self.prompt = prompt
@@ -24,11 +27,11 @@ class TerminalInput:
         while not self._stopping:
             txt = await loop.run_in_executor(None, input, self.prompt)
             _emit_text_submit(self.bus, txt)
-            
+
             if txt.strip() in ("exit", "quit"):
                 self._stopping = True
                 break
-            
+
             await asyncio.sleep(0.1)
             await get_render_idle().wait()
 
@@ -38,4 +41,3 @@ class TerminalInput:
 
     def stop(self):
         self._stopping = True
-

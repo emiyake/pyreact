@@ -155,7 +155,6 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             navsvc.current = path
             _pending_path = path
 
-
     async def _render_loop() -> None:
         """Loop that applies renders and sends new HTML to clients."""
         prev_html = None
@@ -182,14 +181,18 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         def _on_console(text: str):
             # we're inside the loop (startup), so scheduling is safe
             asyncio.create_task(_broadcast_stdout(text))
+
         console.subscribe(_on_console)
 
         # 3. Programmatic navigation (navigate(...) → browser pushState)
         navsvc = HookContext.get_service("nav_service", NavService)
+
         async def _nav_push(path: str):
             await _broadcast_nav(path)
+
         def _nav_listener(path: str):
             asyncio.create_task(_nav_push(path))
+
         navsvc.subs.append(_nav_listener)
 
         # 4. First render will be scheduled now that there's an event loop
@@ -225,7 +228,6 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
 
     # attach lifespan
     app.router.lifespan_context = lifespan  # Modern FastAPI allows setting it like this
-
 
     # ---------- routes ----------
     @app.get("/favicon.ico")
@@ -270,12 +272,14 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                     await _maybe_navigate(msg.get("path", "/"))
                 elif t in ("text", "submit"):
                     bus = HookContext.get_service("input_bus", InputBus)
-                    bus.emit({
-                        "type": t,
-                        "value": msg.get("v", ""),
-                        "source": "web",
-                        "ts": time.time(),
-                    })
+                    bus.emit(
+                        {
+                            "type": t,
+                            "value": msg.get("v", ""),
+                            "source": "web",
+                            "ts": time.time(),
+                        }
+                    )
         except WebSocketDisconnect:
             _WS_CLIENTS.discard(ws)
         except Exception:

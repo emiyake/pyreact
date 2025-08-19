@@ -158,7 +158,9 @@ class _WebStream:
             return 1
 
 
-def enable_web_print(*, echo_to_server_stdout: bool = True, max_chars: Optional[int] = None) -> None:
+def enable_web_print(
+    *, echo_to_server_stdout: bool = True, max_chars: Optional[int] = None
+) -> None:
     """
     Redirects `sys.stdout` and `sys.stderr` to the ConsoleBuffer singleton,
     with an option to also write to the server's original streams.

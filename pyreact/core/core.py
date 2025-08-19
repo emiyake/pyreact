@@ -4,8 +4,8 @@ from functools import wraps
 
 _context_stack = ContextVar("component_context", default=None)
 
-class _HookProxy:
 
+class _HookProxy:
     def __getattr__(self, name):
         # ensure the correct component instance is used in the hook (set in HookContext.render)
         comp = _context_stack.get()
@@ -15,7 +15,9 @@ class _HookProxy:
             )
         return getattr(comp, name)
 
+
 hooks = _HookProxy()
+
 
 class VNode:
     def __init__(self, component_fn, props=None, key=None):
@@ -30,4 +32,5 @@ def component(fn):
         if __internal:
             return fn(**props)
         return VNode(wrapper, props=props, key=key)
+
     return wrapper

@@ -3,6 +3,7 @@ from weakref import WeakSet
 from typing import Optional
 from pyreact.core.runtime import get_render_idle
 
+
 class _InputDispatcher:
     def __init__(self) -> None:
         self._subs: WeakSet = WeakSet()
@@ -21,7 +22,7 @@ class _InputDispatcher:
                         pass
                 # wait for commits to finish on the same loop
                 await get_render_idle().wait()
-                
+
         finally:
             self._task = None
 
@@ -29,7 +30,6 @@ class _InputDispatcher:
         self._subs.add(cb)
         if self._task is None:
             self._task = asyncio.create_task(self._listen())
-
 
     def unsubscribe(self, cb):
         self._subs.discard(cb)
