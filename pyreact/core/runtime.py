@@ -9,6 +9,7 @@ rerender_queue: asyncio.Queue = asyncio.Queue()
 _enqueued: set = set()
 
 _render_idle: Optional[asyncio.Event] = None  # will be created on demand
+_render_signal: Optional[asyncio.Event] = None  # set when a render is scheduled
 
 
 def get_render_idle() -> asyncio.Event:
@@ -20,6 +21,17 @@ def get_render_idle() -> asyncio.Event:
     return _render_idle
 
 
+def get_render_signal() -> asyncio.Event:
+    """Event that is set whenever a rerender is scheduled, and cleared after run_renders drains the queue.
+
+    Useful for event-driven servers to await render activity instead of polling.
+    """
+    global _render_signal
+    if _render_signal is None:
+        _render_signal = asyncio.Event()
+    return _render_signal
+
+
 # scheduling / commit API
 # ------------------------------------------------------------
 def schedule_rerender(ctx):
@@ -28,22 +40,31 @@ def schedule_rerender(ctx):
         return
     _enqueued.add(ctx)
 
-    # idle = get_render_idle()
-    # idle.clear()
+    def _enqueue():
+        try:
+            rerender_queue.put_nowait(ctx)
+        finally:
+            # Set the signal only after the ctx is in the queue to avoid races
+            get_render_signal().set()
 
-    loop.call_soon_threadsafe(rerender_queue.put_nowait, ctx)
+    loop.call_soon_threadsafe(_enqueue)
 
 
 async def run_renders() -> None:
     from pyreact.core.hook import HookContext  # import here to avoid infinite loop
 
-    while not rerender_queue.empty():
-        ctx: HookContext = await rerender_queue.get()
+    # Drain the queue without awaiting on an initially-empty queue
+    while True:
+        try:
+            ctx: HookContext = rerender_queue.get_nowait()
+        except Exception:
+            break
         _enqueued.discard(ctx)
-        # Skip rendering if the context has been unmounted since it was enqueued
         if getattr(ctx, "_mounted", True):
             ctx.render()
             await ctx.run_effects()
 
+    # Mark idle and clear signal after draining current batch
     if rerender_queue.empty():
         get_render_idle().set()
+        get_render_signal().clear()

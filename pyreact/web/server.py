@@ -11,7 +11,7 @@ from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 
 from pyreact.core.hook import HookContext
-from pyreact.core.runtime import schedule_rerender, run_renders
+from pyreact.core.runtime import schedule_rerender, run_renders, get_render_signal
 from pyreact.web.nav_service import NavService
 from pyreact.web.renderer import render_to_html
 from pyreact.input.bus import InputBus
@@ -148,18 +148,28 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             if navsvc.current != path:
                 # Update RouterContext
                 nav(path)
-                await run_renders()
+                # Schedule render; actual rendering happens in the render loop task
+                schedule_rerender(root_ctx)
             _pending_path = None
         else:
             # Router has not mounted yet
             navsvc.current = path
             _pending_path = path
+            schedule_rerender(root_ctx)
+
+    latest_html: Optional[str] = None
+    html_updated_event: asyncio.Event = asyncio.Event()
 
     async def _render_loop() -> None:
-        """Loop that applies renders and sends new HTML to clients."""
+        """Event-driven render loop: wait for render signal instead of constant polling."""
+        nonlocal latest_html
         prev_html = None
+        signal = get_render_signal()
         while True:
-            # apply pending navigation (if Router already exists)
+            # Wait until a render is scheduled or navigation is pending
+            if not _pending_path and not signal.is_set():
+                await signal.wait()
+
             if _pending_path:
                 await _maybe_navigate(_pending_path)
 
@@ -167,8 +177,9 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             html_now = render_to_html(root_ctx)
             if html_now != prev_html:
                 prev_html = html_now
+                latest_html = html_now
+                html_updated_event.set()
                 await _broadcast_html(html_now)
-            await asyncio.sleep(0.05)  # ~20 FPS max
 
     # ---------- lifespan (startup/shutdown) ----------
     @asynccontextmanager
@@ -244,9 +255,16 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             return Response(status_code=204)
 
         path = "/" + full_path
+        # Schedule navigation and wait for the render loop to produce fresh HTML
+        before = latest_html
         await _maybe_navigate(path)
-        await run_renders()
-        ssr_html = render_to_html(root_ctx)
+        if latest_html is before:
+            try:
+                await asyncio.wait_for(html_updated_event.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                pass
+        ssr_html = latest_html or render_to_html(root_ctx)
+        html_updated_event.clear()
 
         console = HookContext.get_service("console_buffer", ConsoleBuffer)
         stdout_ssr = _htmllib.escape(console.dump(), quote=False)
@@ -280,6 +298,8 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                             "ts": time.time(),
                         }
                     )
+                    # Ensure a render is scheduled; components will also schedule via set_state
+                    schedule_rerender(root_ctx)
         except WebSocketDisconnect:
             _WS_CLIENTS.discard(ws)
         except Exception:

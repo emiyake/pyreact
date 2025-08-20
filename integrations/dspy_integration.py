@@ -22,11 +22,27 @@ class DSPyEnv:
 
 DSPyContext = create_context(default=None, name="DSPy")
 
+# Optional global fallback when a provider is not mounted.
+_FALLBACK_ENV: Optional["DSPyEnv"] = None
+
 
 def use_dspy_env() -> DSPyEnv:
     env = hooks.use_context(DSPyContext)
     if env is None:
-        raise RuntimeError("DSPyProvider was not mounted above in the tree.")
+        # Lazily create a fallback environment to avoid hard crashes during SSR or early renders
+        # when the provider has not yet mounted. This still allows per-call LM override via use_dspy_call.
+        global _FALLBACK_ENV
+        if _FALLBACK_ENV is None:
+            try:
+                default_lm = dspy.LM("openai/gpt-4o-mini")
+            except Exception:
+                default_lm = None
+            _FALLBACK_ENV = DSPyEnv(
+                lm=default_lm or object(),
+                models={"default": default_lm} if default_lm else {},
+                optimizer=None,
+            )
+        return _FALLBACK_ENV
     return env
 
 

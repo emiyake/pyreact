@@ -4,7 +4,7 @@ from typing import Optional, Any
 import inspect
 import dspy
 from pyreact.core.core import hooks
-from integrations.dspy_integration import use_dspy_env
+from integrations.dspy_integration import DSPyContext
 
 
 def use_dspy_call(
@@ -47,8 +47,7 @@ def use_dspy_call(
     # -------------- Stable refs --------------
     alive_ref = hooks.use_memo(lambda: {"alive": True}, [])
     task_ref = hooks.use_memo(lambda: {"task": None}, [])
-    # Capture DSPy environment once during render (hooks-safe)
-    env = use_dspy_env()
+    # Do not capture DSPy env during render; resolve at call-time to avoid early SSR errors
 
     def _mount_cleanup():
         def _un():
@@ -64,16 +63,34 @@ def use_dspy_call(
 
         try:
             ver = id(inspect.currentframe())
-            # Determine LM to use for this call
-            selected_lm = env.lm
+            # Determine LM to use for this call (resolve env at call-time)
+            env = DSPyContext.get()
             if lm is not None:
                 selected_lm = lm
-            elif model is not None:
-                selected_lm = env.models.get(model, env.models.get("default", env.lm))
+            elif env is not None and model is not None:
+                selected_lm = env.models.get(model, env.lm)
+            elif env is not None:
+                selected_lm = env.lm
+            else:
+                selected_lm = None  # fall back to dspy global default if configured
 
             # Run the module call under the chosen LM context
             async def _call():
-                with dspy.context(lm=selected_lm):
+                # If we have a selected LM, override via context for this call
+                if selected_lm is not None:
+                    ctx_mgr = dspy.context(lm=selected_lm)
+                else:
+
+                    class _Noop:
+                        def __enter__(self):
+                            return None
+
+                        def __exit__(self, exc_type, exc, tb):
+                            return False
+
+                    ctx_mgr = _Noop()
+
+                with ctx_mgr:
                     acall = getattr(module, "acall", None)
                     if acall is not None and inspect.iscoroutinefunction(acall):
                         return await acall(**inputs)
