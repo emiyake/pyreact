@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-import html as _htmllib
 from contextlib import asynccontextmanager
 from typing import Optional, Set
 
@@ -16,6 +15,7 @@ from pyreact.web.nav_service import NavService
 from pyreact.web.renderer import render_to_html
 from pyreact.input.bus import InputBus
 from pyreact.web.console import ConsoleBuffer, enable_web_print, disable_web_print
+from pyreact.web.ansi import ansi_to_html
 
 
 # -------------------------
@@ -23,6 +23,7 @@ from pyreact.web.console import ConsoleBuffer, enable_web_print, disable_web_pri
 # -------------------------
 _WS_CLIENTS: Set[WebSocket] = set()
 _pending_path: Optional[str] = None  # pending navigation until Router mounts
+_ROOT_CTX: Optional[HookContext] = None  # global pointer for debug helpers
 
 
 _BASE_HTML = """<!doctype html>
@@ -33,12 +34,18 @@ _BASE_HTML = """<!doctype html>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       html,body{margin:0;padding:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu}
+      #dbg{position:fixed;top:0;left:0;right:0;display:flex;gap:.5rem;align-items:center;padding:.4rem .8rem;background:#f7f7f8;border-bottom:1px solid #e5e7eb;z-index:10}
+      #dbg button{padding:.35rem .6rem;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer}
+      #dbg button:hover{background:#f3f4f6}
       #cli{position:fixed;bottom:0;left:0;right:0;padding:.6rem 1rem;border:0;border-top:1px solid #ddd;font-size:16px;outline:none}
-      #root{padding:1rem 1rem 3.5rem}
-      #stdout{white-space:pre-wrap;background:#0b1020;color:#e7f0ff;padding:12px;border-radius:10px;margin:0 1rem 1rem}
+      #root{padding:3rem 1rem 3.5rem}
+      #stdout{white-space:pre-wrap;background:#0b1020;color:#e7f0ff;padding:12px;border-radius:10px;margin:0 1rem 1rem;max-height:40vh;overflow:auto}
     </style>
   </head>
   <body>
+    <div id="dbg">
+      <button id="dbg-tree">Print VNode Tree (Ctrl+T)</button>
+    </div>
     <pre id="stdout">{STDOUT}</pre>
     <div id="root">{SSR}</div>
     <input id="cli" placeholder="type and press Enter…" autofocus />
@@ -48,10 +55,13 @@ _BASE_HTML = """<!doctype html>
         const ws = new WebSocket(proto + location.host + '/ws');
         const cli = document.getElementById('cli');
         const pre = document.getElementById('stdout');
+        const dbgTreeBtn = document.getElementById('dbg-tree');
 
         ws.onopen = () => {
           ws.send(JSON.stringify({t:'hello', path: location.pathname}));
         };
+
+        function scrollToBottom(el){ try{ el.scrollTop = el.scrollHeight; }catch{} }
 
         ws.onmessage = (ev) => {
           try {
@@ -65,7 +75,8 @@ _BASE_HTML = """<!doctype html>
               return;
             }
             if (msg.type === 'stdout') {
-              pre.textContent += msg.text;
+              pre.innerHTML += msg.html;
+              scrollToBottom(pre);
               return;
             }
             } catch {
@@ -87,6 +98,23 @@ _BASE_HTML = """<!doctype html>
           if (e.key === 'Enter') {
             try { ws.send(JSON.stringify({t:'submit', v: cli.value})); } catch {}
             cli.value = '';
+            // keep focus and auto-scroll pre
+            cli.focus();
+            scrollToBottom(pre);
+          }
+        });
+
+        // Debug: print VNode tree
+        if (dbgTreeBtn) {
+          dbgTreeBtn.addEventListener('click', () => {
+            try { ws.send(JSON.stringify({t:'debug', what:'tree'})); } catch {}
+          });
+        }
+        document.addEventListener('keydown', (e) => {
+          const key = (e.key || '').toLowerCase();
+          if ((e.ctrlKey || e.metaKey) && key === 't') {
+            e.preventDefault();
+            try { ws.send(JSON.stringify({t:'debug', what:'tree'})); } catch {}
           }
         });
       })();
@@ -101,6 +129,8 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
     """
     app = FastAPI()
     root_ctx = HookContext(app_component_fn.__name__, app_component_fn)
+    global _ROOT_CTX
+    _ROOT_CTX = root_ctx
 
     # ---------- local helpers (use root_ctx) ----------
 
@@ -127,7 +157,8 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             _WS_CLIENTS.discard(ws)
 
     async def _broadcast_stdout(text: str) -> None:
-        payload = json.dumps({"type": "stdout", "text": text})
+        # Convert ANSI to HTML for colored output in browser
+        payload = json.dumps({"type": "stdout", "html": ansi_to_html(text)})
         dead = []
         for ws in list(_WS_CLIENTS):
             try:
@@ -136,6 +167,16 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                 dead.append(ws)
         for ws in dead:
             _WS_CLIENTS.discard(ws)
+
+    # --------- debug helpers ---------
+    def print_vnode_tree() -> None:
+        ctx = _ROOT_CTX
+        if ctx is None:
+            print("\x1b[90m[debug]\x1b[0m VNode tree not available yet.")
+            return
+        print("\n\x1b[1m\x1b[36m=== VNode Tree ===\x1b[0m")
+        ctx.render_tree()
+        print("\x1b[1m\x1b[36m==================\x1b[0m\n")
 
     async def _maybe_navigate(path: str) -> None:
         global _pending_path
@@ -267,7 +308,7 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         html_updated_event.clear()
 
         console = HookContext.get_service("console_buffer", ConsoleBuffer)
-        stdout_ssr = _htmllib.escape(console.dump(), quote=False)
+        stdout_ssr = ansi_to_html(console.dump())
 
         return HTMLResponse(
             _BASE_HTML.replace("{SSR}", ssr_html).replace("{STDOUT}", stdout_ssr)
@@ -298,8 +339,9 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                             "ts": time.time(),
                         }
                     )
-                    # Ensure a render is scheduled; components will also schedule via set_state
-                    schedule_rerender(root_ctx)
+                elif t == "debug" and msg.get("what") == "tree":
+                    # Print VNode tree to stdout (will be streamed to browser)
+                    print_vnode_tree()
         except WebSocketDisconnect:
             _WS_CLIENTS.discard(ws)
         except Exception:

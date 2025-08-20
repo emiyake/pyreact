@@ -174,8 +174,6 @@ def Home():
     )
     query_text = f" Query: {query_params}" if query_params else ""
 
-    hooks.use_effect(lambda: lambda: print("Home unmounted"), [])
-
     return [
         Text(key="h", text=f"🏠 Home{id_text}{query_text}"),
         Text(

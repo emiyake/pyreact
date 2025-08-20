@@ -304,6 +304,65 @@ class HookContext:
     # FOR DEBUGGING
     def render_tree(self, indent=0):
         pad = "  " * indent
-        print(f"{pad}- {self.name}")
+
+        def _fmt_val(v, depth=0):
+            # ANSI color helpers available via closure below
+            if depth > 1:
+                return f"{DIM}…{RESET}"
+            if isinstance(v, (int, float)):
+                return f"{FG_BLUE}{repr(v)}{RESET}"
+            if isinstance(v, str):
+                s = v.replace("\n", "\\n")
+                text = s if len(s) <= 60 else s[:57] + "…"
+                return f"{FG_YELLOW}{repr(text)}{RESET}"
+            if v is None or isinstance(v, bool):
+                return f"{FG_CYAN}{repr(v)}{RESET}"
+            if isinstance(v, (list, tuple)):
+                return f"{FG_CYAN}[{len(v)}]{RESET}"
+            if isinstance(v, dict):
+                items = []
+                for i, (k, val) in enumerate(v.items()):
+                    if i >= 5:
+                        items.append(f"{DIM}…{RESET}")
+                        break
+                    if k == "children":
+                        # Children can be very large; show only count
+                        try:
+                            clen = len(val)  # type: ignore[arg-type]
+                        except Exception:
+                            clen = "?"
+                        items.append(
+                            f"{FG_CYAN}children{RESET}=[{FG_YELLOW}{clen}{RESET}]"
+                        )
+                    else:
+                        items.append(f"{FG_CYAN}{k}{RESET}={_fmt_val(val, depth + 1)}")
+                body = ", ".join(items)
+                return "{" + body + "}"
+            if callable(v):
+                name = getattr(v, "__name__", None) or getattr(
+                    type(v), "__name__", "callable"
+                )
+                return f"{FG_GREEN}<fn {name}>{RESET}"
+            return f"{FG_GREEN}<{type(v).__name__}>{RESET}"
+
+        # ANSI helpers
+        RESET = "\x1b[0m"
+        # BOLD = "\x1b[1m"  # reserved for future use
+        DIM = "\x1b[2m"
+        FG_GRAY = "\x1b[90m"
+        FG_YELLOW = "\x1b[33m"
+        FG_MAGENTA = "\x1b[35m"
+        FG_CYAN = "\x1b[36m"
+        FG_BLUE = "\x1b[34m"
+        FG_GREEN = "\x1b[32m"
+
+        name_col = f"{FG_MAGENTA}{self.name}{RESET}"
+        if getattr(self, "key", None) is not None:
+            key_part = f" {FG_GRAY}key={RESET}{FG_YELLOW}{self.key!r}{RESET}"
+        else:
+            key_part = ""
+        props_val = _fmt_val(getattr(self, "props", {}))
+        props_part = f" {FG_GRAY}props={RESET}{props_val}"
+        print(f"{pad}{FG_GRAY}-{RESET} {name_col}{key_part}{props_part}")
         for ch in self.children:
             ch.render_tree(indent + 1)
