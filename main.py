@@ -62,6 +62,7 @@ def Log(text: str, trigger: str = "change"):
 @component
 def GuardRail(question, children):
     ver, set_ver = hooks.use_state(0)
+    redirected_ver, set_redirected_ver = hooks.use_state(None)
     toxicity = dspy.Predict(
         dspy.Signature(
             "comment -> toxic: bool",
@@ -82,6 +83,18 @@ def GuardRail(question, children):
         lambda: set_ver(result_toxicity[1] if result_toxicity else 0), [result_toxicity]
     )
 
+    # Defer navigation to an effect so it happens post-commit (Router mounted)
+    def _maybe_redirect():
+        if (
+            result_toxicity
+            and getattr(result_toxicity[0], "toxic", False)
+            and redirected_ver != ver
+        ):
+            set_redirected_ver(ver)
+            navigate("/home/3")
+
+    hooks.use_effect(_maybe_redirect, [ver, redirected_ver, result_toxicity])
+
     if result_toxicity is None or ver != (result_toxicity or [None, None])[1]:
         return []
 
@@ -89,7 +102,6 @@ def GuardRail(question, children):
         return [Log(key="loading", text="Consultando o modelo…")]
 
     if getattr(result_toxicity[0], "toxic", False):
-        navigate("/home/3")
         return [
             Log(
                 key=f"toxic-{result_toxicity[1]}",

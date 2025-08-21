@@ -183,14 +183,29 @@ def print_last_trace() -> None:
     print(f"\n{BOLD}{CYAN}=== Render Trace ==={RESET}")
     print(f"{GRAY}root:{RESET} {YELLOW}{trace['root_name']}{RESET}")
     if trace["reasons"]:
-        print(f"{GRAY}reasons:{RESET} {YELLOW}{trace['reasons']}{RESET}")
+        print(f"{GRAY}reasons:{RESET}")
+        for i, r in enumerate(trace["reasons"]):
+            try:
+                text = str(r)
+            except Exception:
+                text = "<reason>"
+            if "->" in text:
+                left, right = text.split("->", 1)
+                colored = f"{YELLOW}{left.strip()}{RESET} {FG_GREEN}->{RESET} {YELLOW}{right.strip()}{RESET}"
+            else:
+                colored = f"{YELLOW}{text}{RESET}"
+            print(f"  - {CYAN}{i}{RESET}: {colored}")
     for ev in trace["events"]:
         pad = "  " * int(ev.get("depth", 0))
         kind = ev.get("kind", "?")
         name = ev.get("name", "?")
         key = ev.get("key")
-        key_part = f" key={key!r}" if key is not None else ""
-        print(f"{pad}- {kind}: {name}{key_part}")
+        kind_col = (
+            f"{FG_GREEN}{kind}{RESET}" if kind == "origin" else f"{CYAN}{kind}{RESET}"
+        )
+        name_col = f"{FG_MAGENTA}{name}{RESET}"
+        key_part = f" key={YELLOW}{key!r}{RESET}" if key is not None else ""
+        print(f"{pad}- {kind_col}: {name_col}{key_part}")
     print(f"{BOLD}{CYAN}===================={RESET}\n")
 
 

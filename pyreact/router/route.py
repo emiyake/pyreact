@@ -1,16 +1,13 @@
 # route.py
-import re
 from typing import Dict, List, Optional, Any
 from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
 from pyreact.web.nav_service import NavService
 from .router import use_route  # function that reads RouterContext
 from .router import use_routes_catalog  # expose catalog to RouteAgent
+from .match import compile_route_pattern
 
-# Optional context to pass captured params
 RouteParamsContext = create_context(default={}, name="RouteParams")
-
-# Removed global render-cycle state. Router will pick the Route VNode to render.
 
 
 def use_route_params():
@@ -117,51 +114,7 @@ def Route(
     # only needs to inject params and render children when matched.
 
     def build_matcher():
-        # 1. Explicit regex
-        if path.startswith("^"):
-            rx = re.compile(path)
-
-            def match(s: str):
-                m = rx.match(s)
-                return (m is not None, m.groupdict() if m else {})
-
-            return match
-
-        # 2. ':param' and '*' → regex
-        def to_regex(pat: str, exact_local: bool):
-            tokens = []
-            i = 0
-            while i < len(pat):
-                c = pat[i]
-                if c == ":":
-                    j = i + 1
-                    while j < len(pat) and (pat[j].isalnum() or pat[j] == "_"):
-                        j += 1
-                    name = pat[i + 1 : j] or "param"
-                    tokens.append(f"(?P<{name}>[^/]+)")
-                    i = j
-                elif c == "*" and i == len(pat) - 1:  # splat at end
-                    tokens.append("(?P<splat>.*)")
-                    i += 1
-                else:
-                    tokens.append(re.escape(c))
-                    i += 1
-            body = "".join(tokens)
-            anchor = "^" + body + ("$" if exact_local else "")
-            return re.compile(anchor)
-
-        # 3. Prefix with '/*'
-        if path.endswith("/*"):
-            rx = to_regex(path[:-1], exact_local=False)  # leave open
-
-            def match(s: str):
-                m = rx.match(s)
-                return (m is not None, m.groupdict() if m else {})
-
-            return match
-
-        # 4. Exact (or exact with params)
-        rx = to_regex(path, exact_local=exact)
+        rx = compile_route_pattern(path, exact)
 
         def match(s: str):
             m = rx.match(s)

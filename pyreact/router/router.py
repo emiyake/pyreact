@@ -1,26 +1,13 @@
 from typing import Dict, Any, Optional, Union
 from urllib.parse import urlencode, urlparse, urlunparse
+import warnings
 from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
 from pyreact.web.nav_service import NavService
+from .match import matches as route_matches
 
 
-# Create a fallback navigate function for when RouterContext is temporarily lost
-def _fallback_navigate(path):
-    print(f"[ROUTER DEBUG] fallback navigate: {path}")
-    try:
-        from pyreact.core.hook import HookContext
-        from pyreact.web.nav_service import NavService
-
-        navsvc = HookContext.get_service("nav_service", NavService)
-        # Update Router context and commit directly to avoid recursion
-        RouterContext.set({path: _fallback_navigate})
-        navsvc.commit(path)
-    except Exception:
-        pass
-
-
-RouterContext = create_context(default={"/": _fallback_navigate}, name="Router")
+RouteContext = create_context(default="/", name="Route")
 RoutesCatalogContext = create_context(default=[], name="RoutesCatalog")
 
 
@@ -65,9 +52,19 @@ def _build_url(
 
 
 def use_route():
-    state = hooks.use_context(RouterContext)  # e.g. {'/home': navigate}
-    ((path, navigate),) = state.items()
-    return path, navigate
+    # Subscribe to current path changes via RouteContext
+    current = hooks.use_context(RouteContext)
+    # Navigate comes from the NavService (set by Router on mount)
+    navsvc = hooks.get_service("nav_service", NavService)
+
+    def _navigate_live(*args, **kwargs):
+        svc_nav = getattr(navsvc, "navigate", None)
+        if callable(svc_nav):
+            return svc_nav(*args, **kwargs)
+        warnings.warn("navigate called before Router mounted")
+        return None
+
+    return current, _navigate_live
 
 
 @component
@@ -97,7 +94,11 @@ def Router(*, initial=None, children):
 
     hooks.use_effect(_effect_subscribe, [_nav_handler, navsvc])
 
-    def make_state(p, svc):
+    # Ensure RouteContext reflects the current initial path on first mount
+    hooks.use_effect(lambda: (RouteContext.set(navsvc.current), None)[1], [navsvc])
+
+    # Ensure NavService has a stable navigate function
+    def _make_navigate(svc):
         def navigate(
             new_path: Union[str, Dict[str, Any]],
             params: Optional[Dict[str, Any]] = None,
@@ -114,7 +115,6 @@ def Router(*, initial=None, children):
                 fragment: URL fragment/hash
             """
             if isinstance(new_path, dict):
-                # If new_path is a dict, extract components
                 path_str = new_path.get("path", "/")
                 params = new_path.get("params", params)
                 query = new_path.get("query", query)
@@ -122,68 +122,21 @@ def Router(*, initial=None, children):
             else:
                 path_str = new_path
 
-            # Build the final URL with parameters and query string
             final_url = _build_url(path_str, params, query, fragment)
-
-            RouterContext.set({final_url: navigate})
+            # Update RouteContext and notify subscribers
+            RouteContext.set(final_url)
+            # Commit and notify NavService subscribers (e.g., Router, server)
             svc.commit(final_url)
 
-        svc.current = p
-        svc.navigate = navigate
-        return {p: navigate}
+        return navigate
 
-    state = hooks.use_memo(lambda: make_state(initial, navsvc), [initial])
+    navigate_fn = hooks.use_memo(lambda: _make_navigate(navsvc), [navsvc])
+    navsvc.navigate = navigate_fn
 
-    # Build the current router value using the CURRENT path and the stable navigate fn
+    # Use the CURRENT path from the service
     current_path_only = navsvc.current
-    navigate_fn = getattr(navsvc, "navigate", None)
-    if navigate_fn is None:
-        # fallback to the navigate created in make_state
-        try:
-            navigate_fn = next(iter(state.values()))
-        except Exception:
-            navigate_fn = None
-
-    router_value = {current_path_only: navigate_fn}
 
     # Only render the first matching <Route> child
-    def _matches(path_pattern: str, s: str, exact: bool) -> bool:
-        import re
-
-        # explicit regex
-        if path_pattern.startswith("^"):
-            return re.match(path_pattern, s) is not None
-
-        # helper to convert route pattern to regex
-        def to_regex(pat: str, exact_local: bool):
-            tokens = []
-            i = 0
-            while i < len(pat):
-                c = pat[i]
-                if c == ":":
-                    j = i + 1
-                    while j < len(pat) and (pat[j].isalnum() or pat[j] == "_"):
-                        j += 1
-                    name = pat[i + 1 : j] or "param"
-                    tokens.append(f"(?P<{name}>[^/]+)")
-                    i = j
-                elif c == "*" and i == len(pat) - 1:  # splat at end
-                    tokens.append("(?P<splat>.*)")
-                    i += 1
-                else:
-                    tokens.append(re.escape(c))
-                    i += 1
-            body = "".join(tokens)
-            anchor = "^" + body + ("$" if exact_local else "")
-            return re.compile(anchor)
-
-        # prefix with '/*'
-        if path_pattern.endswith("/*"):
-            rx = to_regex(path_pattern[:-1], exact_local=False)
-            return rx.match(s) is not None
-
-        rx = to_regex(path_pattern, exact_local=exact)
-        return rx.match(s) is not None
 
     current_path_for_match = current_path_only.split("?")[0]
 
@@ -198,7 +151,7 @@ def Router(*, initial=None, children):
             continue
         path_pattern = props.get("path", "/")
         exact = props.get("exact", True)
-        if _matches(path_pattern, current_path_for_match, exact):
+        if route_matches(path_pattern, current_path_for_match, exact):
             selected_child = ch
             break
 
@@ -233,8 +186,8 @@ def Router(*, initial=None, children):
         )
 
     return [
-        RouterContext(
-            value=router_value,
+        RouteContext(
+            value=current_path_only,
             children=[
                 RoutesCatalogContext(value=routes_catalog, children=selected_children)
             ],

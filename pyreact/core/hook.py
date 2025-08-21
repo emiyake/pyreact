@@ -46,7 +46,14 @@ class HookContext:
 
             if val != self.hooks[idx]:
                 self.hooks[idx] = val
-                schedule_rerender(self, reason=f"use_state[{idx}] set")
+                # Add value to render-trace reasons (truncated repr)
+                try:
+                    sval = repr(val)
+                    if len(sval) > 60:
+                        sval = sval[:57] + "…"
+                except Exception:
+                    sval = f"<{type(val).__name__}>"
+                schedule_rerender(self, reason=f"use_state[{idx}] set -> {sval}")
 
         self.hook_idx += 1
         return self.hooks[idx], set_state
@@ -92,7 +99,22 @@ class HookContext:
             new_state = r(s, action)
             if new_state != s:
                 self.hooks[idx] = (new_state, r, dkey)
-                schedule_rerender(self, reason=f"use_reducer[{idx}] dispatch")
+                # Include action and new state in reasons (truncated repr)
+                try:
+                    a = repr(action)
+                    if len(a) > 60:
+                        a = a[:57] + "…"
+                except Exception:
+                    a = f"<{type(action).__name__}>"
+                try:
+                    ns = repr(new_state)
+                    if len(ns) > 60:
+                        ns = ns[:57] + "…"
+                except Exception:
+                    ns = f"<{type(new_state).__name__}>"
+                schedule_rerender(
+                    self, reason=f"use_reducer[{idx}] dispatch {a} -> {ns}"
+                )
 
         state, _r, _d = self.hooks[idx]
         self.hook_idx += 1
