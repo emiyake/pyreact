@@ -34,18 +34,18 @@ _BASE_HTML = """<!doctype html>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       html,body{margin:0;padding:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu}
-      #dbg{display:flex;gap:.5rem;align-items:center;padding:.4rem .8rem;background:#f7f7f8;border-bottom:1px solid #e5e7eb;z-index:10}
+      #dbg{position:fixed;top:0;left:0;right:0;display:flex;gap:.5rem;align-items:center;padding:.4rem .8rem;background:#f7f7f8;border-bottom:1px solid #e5e7eb;z-index:10}
       #dbg button{padding:.35rem .6rem;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer}
       #dbg button:hover{background:#f3f4f6}
       #cli{position:fixed;bottom:0;left:0;right:0;padding:.6rem 1rem;border:0;border-top:1px solid #ddd;font-size:16px;outline:none}
-      #root{padding:3rem 1rem 3.5rem}
-      #stdout{line-height:1.5;white-space:pre-wrap;background:#0b1020;color:#e7f0ff;padding:12px;border-radius:10px;margin:0 1rem 1rem;max-height:90vh;overflow:auto}
+      #root{padding:3rem}
+      #stdout{margin-top: 50px;line-height:1.5;white-space:pre-wrap;background:#0b1020;color:#e7f0ff;padding:12px;border-radius:10px;margin:0 1rem 1rem;max-height:80vh;overflow:auto}
     </style>
   </head>
   <body>
     <div id="dbg">
-      <button id="dbg-tree">Print VNode Tree (Ctrl+T)</button>
-      <button id="dbg-trace">Print Render Trace (Ctrl+R)</button>
+      <button id="dbg-tree">Print VNode Tree (Ctrl+V)</button>
+      <button id="dbg-trace">Print Render Trace (Ctrl+T)</button>
       <label style="display:inline-flex;align-items:center;gap:.4rem;font-size:14px">
         <input type="checkbox" id="dbg-trace-enable" /> enable tracing
       </label>
@@ -155,11 +155,11 @@ _BASE_HTML = """<!doctype html>
         }
         document.addEventListener('keydown', (e) => {
           const key = (e.key || '').toLowerCase();
-          if ((e.ctrlKey || e.metaKey) && key === 't') {
+          if ((e.ctrlKey || e.metaKey) && key === 'v') {
             e.preventDefault();
             try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'tree'})); } catch {}
           }
-          if ((e.ctrlKey || e.metaKey) && key === 'r') {
+          if ((e.ctrlKey || e.metaKey) && key === 't') {
             e.preventDefault();
             try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'trace'})); } catch {}
           }

@@ -1,6 +1,5 @@
 from integrations.dspy_integration import DSPyProvider, use_dspy_module
 from integrations.use_dspy import use_dspy_call
-from pyreact.boot import run_terminal
 from pyreact.components.keystroke import Keystroke
 from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
@@ -12,10 +11,9 @@ from pyreact.router import (
     use_query_params,
     use_routes_catalog,
 )
+from pyreact.router.route import use_route_params
 from router_agent import RouterAgent as ProjectRouterAgent
 import dspy
-
-from pyreact.router.route import use_route_params
 import os
 import dotenv
 
@@ -114,7 +112,6 @@ def GuardRail(question, children):
 
 @component
 def QAAgent(question: str):
-    # qa_mod = dspy.Predict(QASig)
     qa_mod = use_dspy_module(QASig, dspy.ChainOfThought, name="qa-cot")
     call_dspy, result, loading, error = use_dspy_call(qa_mod, model="reasoning")
 
@@ -316,8 +313,3 @@ def Root():
         "reasoning": lm_default,
     }
     return [DSPyProvider(key="dspy", models=models, children=[App(key="app")])]
-
-
-if __name__ == "__main__":
-    run_terminal(Root, prompt="> ", fps=20)
-    # run_web(Root, host="127.0.0.1", port=8000)
