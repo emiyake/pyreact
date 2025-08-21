@@ -60,7 +60,10 @@ def create_context(*, default=None, name="Context", prop="value"):
         def set(value):
             token = ctx_var.set(value)
             for hctx in list(subs_set):
-                schedule_rerender(hctx)
+                try:
+                    schedule_rerender(hctx, reason=f"context {name} set")
+                except Exception:
+                    schedule_rerender(hctx)
             return token
 
         def __call__(self, **props):

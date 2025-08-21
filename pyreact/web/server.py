@@ -45,6 +45,10 @@ _BASE_HTML = """<!doctype html>
   <body>
     <div id="dbg">
       <button id="dbg-tree">Print VNode Tree (Ctrl+T)</button>
+      <button id="dbg-trace">Print Render Trace (Ctrl+R)</button>
+      <label style="display:inline-flex;align-items:center;gap:.4rem;font-size:14px">
+        <input type="checkbox" id="dbg-trace-enable" /> enable tracing
+      </label>
     </div>
     <pre id="stdout">{STDOUT}</pre>
     <div id="root">{SSR}</div>
@@ -52,51 +56,80 @@ _BASE_HTML = """<!doctype html>
     <script>
       (function(){
         const proto = (location.protocol === 'https:') ? 'wss://' : 'ws://';
-        const ws = new WebSocket(proto + location.host + '/ws');
         const cli = document.getElementById('cli');
         const pre = document.getElementById('stdout');
         const dbgTreeBtn = document.getElementById('dbg-tree');
+        const dbgTraceBtn = document.getElementById('dbg-trace');
+        const dbgTraceEnable = document.getElementById('dbg-trace-enable');
 
-        ws.onopen = () => {
-          ws.send(JSON.stringify({t:'hello', path: location.pathname}));
-        };
+        let ws;
+        let retries = 0;
+        const maxDelay = 10000; // 10s cap
+        let heartbeat;
 
         function scrollToBottom(el){ try{ el.scrollTop = el.scrollHeight; }catch{} }
+        function isOpen() { return ws && ws.readyState === WebSocket.OPEN; }
 
-        ws.onmessage = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data);
-            if (msg.type === 'html') {
-              document.getElementById('root').innerHTML = msg.html;
-              return;
-            }
-            if (msg.type === 'nav') {
-              if (location.pathname !== msg.path) history.pushState({}, '', msg.path);
-              return;
-            }
-            if (msg.type === 'stdout') {
-              pre.innerHTML += msg.html;
-              scrollToBottom(pre);
-              return;
-            }
+        function connect() {
+          ws = new WebSocket(proto + location.host + '/ws');
+
+          ws.onopen = () => {
+            retries = 0;
+            try { ws.send(JSON.stringify({t:'hello', path: location.pathname})); } catch {}
+            clearInterval(heartbeat);
+            heartbeat = setInterval(() => {
+              try { if (isOpen()) ws.send(JSON.stringify({t:'ping', ts: Date.now()})); } catch {}
+            }, 25000);
+          };
+
+          ws.onmessage = (ev) => {
+            try {
+              const msg = JSON.parse(ev.data);
+              if (msg.type === 'html') {
+                document.getElementById('root').innerHTML = msg.html;
+                return;
+              }
+              if (msg.type === 'nav') {
+                if (location.pathname !== msg.path) history.pushState({}, '', msg.path);
+                return;
+              }
+              if (msg.type === 'stdout') {
+                pre.innerHTML += msg.html;
+                scrollToBottom(pre);
+                return;
+              }
             } catch {
               // compatibility: legacy payload with raw HTML
               document.getElementById('root').innerHTML = ev.data;
             }
           };
 
-          // Back/forward → server
+          ws.onclose = () => {
+            clearInterval(heartbeat);
+            retries += 1;
+            const delay = Math.min(1000 * Math.pow(2, retries - 1), maxDelay) + Math.random() * 500;
+            setTimeout(connect, delay);
+          };
+
+          ws.onerror = () => {
+            try { ws.close(); } catch {}
+          };
+        }
+
+        connect();
+
+        // Back/forward → server
         window.addEventListener('popstate', () => {
-          try { ws.send(JSON.stringify({t:'nav', path: location.pathname})); } catch {}
+          try { if (isOpen()) ws.send(JSON.stringify({t:'nav', path: location.pathname})); } catch {}
         });
 
-          // Input field (Keystroke → InputBus)
+        // Input field (Keystroke → InputBus)
         cli.addEventListener('input', (e) => {
-          try { ws.send(JSON.stringify({t:'text', v: e.target.value})); } catch {}
+          try { if (isOpen()) ws.send(JSON.stringify({t:'text', v: e.target.value})); } catch {}
         });
         cli.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') {
-            try { ws.send(JSON.stringify({t:'submit', v: cli.value})); } catch {}
+            try { if (isOpen()) ws.send(JSON.stringify({t:'submit', v: cli.value})); } catch {}
             cli.value = '';
             // keep focus and auto-scroll pre
             cli.focus();
@@ -107,14 +140,28 @@ _BASE_HTML = """<!doctype html>
         // Debug: print VNode tree
         if (dbgTreeBtn) {
           dbgTreeBtn.addEventListener('click', () => {
-            try { ws.send(JSON.stringify({t:'debug', what:'tree'})); } catch {}
+            try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'tree'})); } catch {}
+          });
+        }
+        if (dbgTraceBtn) {
+          dbgTraceBtn.addEventListener('click', () => {
+            try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'trace'})); } catch {}
+          });
+        }
+        if (dbgTraceEnable) {
+          dbgTraceEnable.addEventListener('change', (e) => {
+            try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what: e.target.checked ? 'enable_trace':'disable_trace'})); } catch {}
           });
         }
         document.addEventListener('keydown', (e) => {
           const key = (e.key || '').toLowerCase();
           if ((e.ctrlKey || e.metaKey) && key === 't') {
             e.preventDefault();
-            try { ws.send(JSON.stringify({t:'debug', what:'tree'})); } catch {}
+            try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'tree'})); } catch {}
+          }
+          if ((e.ctrlKey || e.metaKey) && key === 'r') {
+            e.preventDefault();
+            try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'trace'})); } catch {}
           }
         });
       })();
@@ -178,6 +225,14 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         ctx.render_tree()
         print("\x1b[1m\x1b[36m==================\x1b[0m\n")
 
+    def print_render_trace() -> None:
+        try:
+            from pyreact.core.debug import print_last_trace
+
+            print_last_trace()
+        except Exception:
+            print("\x1b[90m[debug]\x1b[0m render trace not available.")
+
     async def _maybe_navigate(path: str) -> None:
         global _pending_path
         if path == "/favicon.ico":
@@ -190,13 +245,13 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                 # Update RouterContext
                 nav(path)
                 # Schedule render; actual rendering happens in the render loop task
-                schedule_rerender(root_ctx)
+                schedule_rerender(root_ctx, reason=f"nav to {path}")
             _pending_path = None
         else:
             # Router has not mounted yet
             navsvc.current = path
             _pending_path = path
-            schedule_rerender(root_ctx)
+            schedule_rerender(root_ctx, reason=f"pending nav {path}")
 
     latest_html: Optional[str] = None
     html_updated_event: asyncio.Event = asyncio.Event()
@@ -248,7 +303,7 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         navsvc.subs.append(_nav_listener)
 
         # 4. First render will be scheduled now that there's an event loop
-        schedule_rerender(root_ctx)
+        schedule_rerender(root_ctx, reason="server startup")
         render_task = asyncio.create_task(_render_loop())
 
         # 5. Initial SSR will already use stdout accumulated so far
@@ -337,9 +392,30 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                             "ts": time.time(),
                         }
                     )
-                elif t == "debug" and msg.get("what") == "tree":
-                    # Print VNode tree to stdout (will be streamed to browser)
-                    print_vnode_tree()
+                elif t == "debug":
+                    what = msg.get("what")
+                    if what == "tree":
+                        # Print VNode tree to stdout (will be streamed to browser)
+                        print_vnode_tree()
+                    elif what == "trace":
+                        print_render_trace()
+                    elif what == "enable_trace":
+                        try:
+                            from pyreact.core.debug import enable_tracing, clear_traces
+
+                            clear_traces()
+                            enable_tracing()
+                            print("\x1b[90m[debug]\x1b[0m tracing enabled.")
+                        except Exception:
+                            print("\x1b[90m[debug]\x1b[0m could not enable tracing.")
+                    elif what == "disable_trace":
+                        try:
+                            from pyreact.core.debug import disable_tracing
+
+                            disable_tracing()
+                            print("\x1b[90m[debug]\x1b[0m tracing disabled.")
+                        except Exception:
+                            print("\x1b[90m[debug]\x1b[0m could not disable tracing.")
         except WebSocketDisconnect:
             _WS_CLIENTS.discard(ws)
         except Exception:

@@ -1,6 +1,6 @@
 from integrations.dspy_integration import DSPyProvider, use_dspy_module
 from integrations.use_dspy import use_dspy_call
-from pyreact.boot import run_web
+from pyreact.boot import run_terminal
 from pyreact.components.keystroke import Keystroke
 from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
@@ -53,8 +53,9 @@ class QASig(dspy.Signature):
 
 
 @component
-def Print(text: str):
-    hooks.use_effect(lambda: print(text), [text])
+def Log(text: str, trigger: str = "change"):
+    deps = [] if trigger == "mount" else [text]
+    hooks.use_effect(lambda: print(text), deps)
     return []
 
 
@@ -85,15 +86,14 @@ def GuardRail(question, children):
         return []
 
     if loading:
-        return [Print(key="loading", text="Consultando o modelo…")]
+        return [Log(key="loading", text="Consultando o modelo…")]
 
     if getattr(result_toxicity[0], "toxic", False):
         navigate("/home/3")
-        return []
         return [
-            Print(
+            Log(
                 key=f"toxic-{result_toxicity[1]}",
-                text="The question is considered toxic",
+                text="Esta pergunta é considerada tóxica",
             )
         ]
     else:
@@ -117,12 +117,12 @@ def QAAgent(question: str):
         print("Carregando... Aguarde.")
 
     if error:
-        return [Print(key="error", text=f"Error: {error}")]
+        return [Log(key="error", text=f"Error: {error}")]
 
     if result is None:
         return []
 
-    return [Print(key="agent", text=f"Response: {getattr(result[0], 'answer', None)}")]
+    return [Log(key="agent", text=f"Response: {getattr(result[0], 'answer', None)}")]
 
 
 @component
@@ -135,7 +135,7 @@ def QAHome():
         set_last_message(line)
 
     return [
-        Print(key="hint", text="Digite sua pergunta e pressione Enter…"),
+        Log(key="hint", text="Digite sua pergunta e pressione Enter…"),
         Keystroke(key="qa_input", on_submit=on_enter),
         GuardRail(
             key="guardrail",
@@ -145,10 +145,7 @@ def QAHome():
     ]
 
 
-@component
-def Text(text: str):
-    hooks.use_effect(lambda: print(text), [])
-    return []
+# Text was merged into Log with trigger="mount"
 
 
 @component
@@ -190,18 +187,21 @@ def Home():
     catalog = use_routes_catalog()
 
     return [
-        Text(key="h", text=f"🏠 Home{id_text}{query_text}"),
-        Text(
-            key="help", text="Press 'a' for about, 'q' for qa, 'd' for dict navigation"
+        Log(key="h", text=f"🏠 Home{id_text}{query_text}", trigger="mount"),
+        Log(
+            key="help",
+            text="Press 'a' for about, 'q' for qa, 'd' for dict navigation",
+            trigger="mount",
         ),
         Keystroke(key="nav", on_submit=handle_navigate_with_params),
-        Text(
+        Log(
             key="nl1",
             text="Digite um comando natural para navegar (ex: 'ir para about' ou 'abrir QA') e pressione Enter:",
+            trigger="mount",
         ),
         Keystroke(key="nl", on_submit=on_nl_submit),
         ProjectRouterAgent(key="agent-router", message=user_query),
-        Print(
+        Log(
             key="catalog",
             text=f"Rotas disponíveis: {[r.get('name') or r['path'] for r in (catalog or [])]}",
         ),
@@ -231,10 +231,11 @@ def About():
     )
 
     return [
-        Text(key="a", text=f"ℹ️  About{search_text}{filter_text}"),
-        Text(
+        Log(key="a", text=f"ℹ️  About{search_text}{filter_text}", trigger="mount"),
+        Log(
             key="help2",
             text="Press 'h' to go home with params, 's' to add search query",
+            trigger="mount",
         ),
         Keystroke(key="about-nav", on_submit=handle_navigation),
     ]
@@ -242,7 +243,7 @@ def About():
 
 @component
 def NotFound():
-    return [Text(key="404", text="404 – not found")]
+    return [Log(key="404", text="404 – not found", trigger="mount")]
 
 
 @component
@@ -306,5 +307,5 @@ def Root():
 
 
 if __name__ == "__main__":
-    # run_terminal(Root, prompt="> ", fps=20)
-    run_web(Root, host="127.0.0.1", port=8000)
+    run_terminal(Root, prompt="> ", fps=20)
+    # run_web(Root, host="127.0.0.1", port=8000)

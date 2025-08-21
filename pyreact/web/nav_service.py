@@ -38,3 +38,12 @@ class NavService:
         """Get path portion of current URL (without query or fragment)"""
         parsed = urlparse(self.current)
         return parsed.path
+
+    def commit(self, final_url: str) -> None:
+        """Set current URL and notify subscribers."""
+        self.current = final_url
+        for fn in list(self.subs):
+            try:
+                fn(final_url)
+            except Exception:
+                pass

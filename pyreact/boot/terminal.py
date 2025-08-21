@@ -9,7 +9,7 @@ from pyreact.web.nav_service import NavService
 def run_terminal(app_component_fn, *, fps: int = 20, prompt: str = ">> "):
     async def _main():
         root = HookContext(app_component_fn.__name__, app_component_fn)
-        schedule_rerender(root)
+        schedule_rerender(root, reason="terminal startup")
 
         bus = HookContext.get_service("input_bus", InputBus)
 
@@ -24,6 +24,40 @@ def run_terminal(app_component_fn, *, fps: int = 20, prompt: str = ">> "):
                 print(f"{BOLD}{CYAN}=================={RESET}\n")
             except Exception:
                 print("\x1b[90m[debug]\x1b[0m VNode tree not available yet.")
+
+        # Debug helper: print last render trace
+        def _print_render_trace(_args: str = ""):
+            try:
+                from pyreact.core.debug import print_last_trace
+
+                print_last_trace()
+            except Exception:
+                print("\x1b[90m[debug]\x1b[0m Render trace not available yet.")
+
+        # Toggle tracing on/off
+        def _toggle_tracing(args: str = ""):
+            cmd = (args or "").strip().lower()
+            try:
+                if cmd in ("on", "enable", "1", "true"):
+                    from pyreact.core.debug import enable_tracing, clear_traces
+
+                    clear_traces()
+                    enable_tracing()
+                    print("\x1b[90m[debug]\x1b[0m tracing enabled.")
+                elif cmd in ("off", "disable", "0", "false"):
+                    from pyreact.core.debug import disable_tracing
+
+                    disable_tracing()
+                    print("\x1b[90m[debug]\x1b[0m tracing disabled.")
+                else:
+                    GRAY = "\x1b[90m"
+                    RESET = "\x1b[0m"
+                    YELLOW = "\x1b[33m"
+                    print(
+                        f"{GRAY}Usage:{RESET} {YELLOW}:trace-on|:trace-off{RESET} or {YELLOW}:trace enable|disable{RESET}"
+                    )
+            except Exception:
+                print("\x1b[90m[debug]\x1b[0m could not toggle tracing.")
 
         # Debug helper: print current route
         def _print_current_route(_args: str = ""):
@@ -71,7 +105,7 @@ def run_terminal(app_component_fn, *, fps: int = 20, prompt: str = ">> "):
                 else:
                     # Router not mounted yet; set current and schedule render
                     navsvc.current = dest
-                    schedule_rerender(root)
+                    schedule_rerender(root, reason=f"terminal nav to {dest}")
             except Exception:
                 print("\x1b[90m[debug]\x1b[0m Navigation service not ready.")
 
@@ -81,6 +115,9 @@ def run_terminal(app_component_fn, *, fps: int = 20, prompt: str = ">> "):
             prompt=prompt,
             commands={
                 "tree": _print_vnode_tree,
+                "trace": _print_render_trace,
+                "trace-on": lambda _="": _toggle_tracing("on"),
+                "trace-off": lambda _="": _toggle_tracing("off"),
                 "route": _print_current_route,
                 "nav": _navigate_to,
                 # Alias quit commands to stop the loop via built-in handling

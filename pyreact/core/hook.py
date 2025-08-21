@@ -1,10 +1,9 @@
 # hook.py ----------------------------------------------------
 from typing import Dict
 from weakref import WeakSet
-from pyreact.core.core import VNode
-from pyreact.core.runtime import schedule_rerender
+from .core import VNode
+from .runtime import schedule_rerender
 import asyncio
-
 import warnings
 
 
@@ -27,8 +26,9 @@ class HookContext:
         self.hook_idx: int = 0
         self._ctx_subs: list[WeakSet] = []
         self._effect_slots: set[int] = set()
-        # Track mount lifecycle to avoid rerenders after unmount
-        self._mounted: bool = True
+        self._mounted: bool = (
+            True  # Track mount lifecycle to avoid rerenders after unmount
+        )
 
     def use_state(self, initial):
         idx = self.hook_idx
@@ -37,15 +37,16 @@ class HookContext:
 
         def set_state(val):
             nonlocal idx
-            # Ignore state updates after unmount
-            if not getattr(self, "_mounted", True):
+            if not getattr(
+                self, "_mounted", True
+            ):  # Ignore state updates after unmount
                 return
             if callable(val):
                 val = val(self.hooks[idx])
 
             if val != self.hooks[idx]:
                 self.hooks[idx] = val
-                schedule_rerender(self)
+                schedule_rerender(self, reason=f"use_state[{idx}] set")
 
         self.hook_idx += 1
         return self.hooks[idx], set_state
@@ -63,7 +64,6 @@ class HookContext:
 
         if idx >= len(self.hooks):  # first mount
             state0 = init_fn(initial) if init_fn is not None else initial
-            # Slot stores: (state, reducer, deps_key)
             self.hooks.append((state0, reducer, deps_key))
         else:  # updates
             state, old_reducer, old_deps = self.hooks[idx]
@@ -92,7 +92,7 @@ class HookContext:
             new_state = r(s, action)
             if new_state != s:
                 self.hooks[idx] = (new_state, r, dkey)
-                schedule_rerender(self)
+                schedule_rerender(self, reason=f"use_reducer[{idx}] dispatch")
 
         state, _r, _d = self.hooks[idx]
         self.hook_idx += 1
@@ -115,8 +115,7 @@ class HookContext:
         self.hook_idx += 1
 
     def use_callback(self, fn, deps=None):
-        deps_key = None if deps is None else tuple(deps)  # [] → () (immutable object)
-
+        deps_key = None if deps is None else tuple(deps)  # [] -> () (immutable object)
         idx = self.hook_idx
 
         if idx >= len(self.hooks):  # first time
@@ -124,7 +123,7 @@ class HookContext:
         else:
             cached_fn, old_deps = self.hooks[idx]
             if deps_key is not None and old_deps != deps_key:
-                self.hooks[idx] = (fn, deps_key)  # deps changed → new fn
+                self.hooks[idx] = (fn, deps_key)  # deps changed -> new fn
             else:
                 fn = cached_fn  # use memo
 
@@ -132,16 +131,16 @@ class HookContext:
         return fn
 
     def use_memo(self, factory, deps=None):
-        key = None if deps is None else tuple(deps)  # [] → () (immutable object)
+        deps_key = None if deps is None else tuple(deps)  # [] → () (immutable object)
         idx = self.hook_idx
 
         if idx >= len(self.hooks):  # first time
-            self.hooks.append((factory(), key))
+            self.hooks.append((factory(), deps_key))
         else:
             value, old_key = self.hooks[idx]
-            if key is not None and old_key != key:
-                value = factory()  # deps changed
-                self.hooks[idx] = (value, key)
+            if deps_key is not None and old_key != deps_key:
+                value = factory()  # deps changed -> new value
+                self.hooks[idx] = (value, deps_key)
 
         self.hook_idx += 1
         return self.hooks[idx][0]
@@ -166,7 +165,7 @@ class HookContext:
             self.hooks.append(value)
         elif self.hooks[idx] != value:
             self.hooks[idx] = value
-            schedule_rerender(self)
+            schedule_rerender(self, reason="use_context value changed")
 
         self.hook_idx += 1
         return value
@@ -211,9 +210,20 @@ class HookContext:
     def render(self):
         import pyreact.core.core as core
 
+        try:
+            from .debug import enter_render, exit_render
+        except Exception:
+
+            def enter_render(*_args, **_kw):  # type: ignore
+                return None
+
+            def exit_render(*_args, **_kw):  # type: ignore
+                return None
+
         token = core._context_stack.set(self)
 
         try:
+            _depth_token = enter_render(self)
             self.hook_idx = 0
             self.effects = []
 
@@ -282,6 +292,10 @@ class HookContext:
             for child in self.children:
                 child.render()
         finally:
+            try:
+                exit_render(_depth_token)
+            except Exception:
+                pass
             # 8. restore previous component and original stack
             core._context_stack.reset(token)
 
@@ -303,66 +317,6 @@ class HookContext:
 
     # FOR DEBUGGING
     def render_tree(self, indent=0):
-        pad = "  " * indent
+        from .debug import render_tree as _render_tree
 
-        def _fmt_val(v, depth=0):
-            # ANSI color helpers available via closure below
-            if depth > 1:
-                return f"{DIM}…{RESET}"
-            if isinstance(v, (int, float)):
-                return f"{FG_BLUE}{repr(v)}{RESET}"
-            if isinstance(v, str):
-                s = v.replace("\n", "\\n")
-                text = s if len(s) <= 60 else s[:57] + "…"
-                return f"{FG_YELLOW}{repr(text)}{RESET}"
-            if v is None or isinstance(v, bool):
-                return f"{FG_CYAN}{repr(v)}{RESET}"
-            if isinstance(v, (list, tuple)):
-                return f"{FG_CYAN}[{len(v)}]{RESET}"
-            if isinstance(v, dict):
-                items = []
-                for i, (k, val) in enumerate(v.items()):
-                    if i >= 5:
-                        items.append(f"{DIM}…{RESET}")
-                        break
-                    if k == "children":
-                        # Children can be very large; show only count
-                        try:
-                            clen = len(val)  # type: ignore[arg-type]
-                        except Exception:
-                            clen = "?"
-                        items.append(
-                            f"{FG_CYAN}children{RESET}=[{FG_YELLOW}{clen}{RESET}]"
-                        )
-                    else:
-                        items.append(f"{FG_CYAN}{k}{RESET}={_fmt_val(val, depth + 1)}")
-                body = ", ".join(items)
-                return "{" + body + "}"
-            if callable(v):
-                name = getattr(v, "__name__", None) or getattr(
-                    type(v), "__name__", "callable"
-                )
-                return f"{FG_GREEN}<fn {name}>{RESET}"
-            return f"{FG_GREEN}<{type(v).__name__}>{RESET}"
-
-        # ANSI helpers
-        RESET = "\x1b[0m"
-        # BOLD = "\x1b[1m"  # reserved for future use
-        DIM = "\x1b[2m"
-        FG_GRAY = "\x1b[90m"
-        FG_YELLOW = "\x1b[33m"
-        FG_MAGENTA = "\x1b[35m"
-        FG_CYAN = "\x1b[36m"
-        FG_BLUE = "\x1b[34m"
-        FG_GREEN = "\x1b[32m"
-
-        name_col = f"{FG_MAGENTA}{self.name}{RESET}"
-        if getattr(self, "key", None) is not None:
-            key_part = f" {FG_GRAY}key={RESET}{FG_YELLOW}{self.key!r}{RESET}"
-        else:
-            key_part = ""
-        props_val = _fmt_val(getattr(self, "props", {}))
-        props_part = f" {FG_GRAY}props={RESET}{props_val}"
-        print(f"{pad}{FG_GRAY}-{RESET} {name_col}{key_part}{props_part}")
-        for ch in self.children:
-            ch.render_tree(indent + 1)
+        _render_tree(self, indent)

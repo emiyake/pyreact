@@ -9,13 +9,12 @@ from integrations.dspy_integration import DSPyContext
 
 def use_dspy_call(
     module, *, model: Optional[str] = None, lm: Optional[Any] = None
-) -> tuple[Callable[..., None], object, bool, Optional[Exception]]:
+) -> tuple[Callable[..., None], tuple, bool, Optional[Exception]]:
     """
     Policy: replace (the last call wins).
     Returns (run, result, loading, error). Forces an update after each success via 'ver'.
     """
 
-    # ---------------- Reducer ----------------
     def reducer(state, action):
         typ = action["type"]
         if typ == "start":
@@ -44,10 +43,8 @@ def use_dspy_call(
     initial = {"status": "idle", "result": None, "error": None, "ver": 0}
     state, dispatch = hooks.use_reducer(reducer, initial)
 
-    # -------------- Stable refs --------------
     alive_ref = hooks.use_memo(lambda: {"alive": True}, [])
     task_ref = hooks.use_memo(lambda: {"task": None}, [])
-    # Do not capture DSPy env during render; resolve at call-time to avoid early SSR errors
 
     def _mount_cleanup():
         def _un():
@@ -57,38 +54,28 @@ def use_dspy_call(
 
     hooks.use_effect(_mount_cleanup, [])
 
-    # -------------- Async worker --------------
     async def _do_call(inputs: dict):
         current_task = asyncio.current_task()
 
         try:
             ver = id(inspect.currentframe())
-            # Determine LM to use for this call (resolve env at call-time)
             env = DSPyContext.get()
             if lm is not None:
                 selected_lm = lm
             elif env is not None and model is not None:
-                selected_lm = env.models.get(model, env.lm)
+                selected_lm = env.models.get(model, env.models["default"])
             elif env is not None:
-                selected_lm = env.lm
+                selected_lm = env.models["default"]
             else:
                 selected_lm = None  # fall back to dspy global default if configured
 
-            # Run the module call under the chosen LM context
             async def _call():
-                # If we have a selected LM, override via context for this call
                 if selected_lm is not None:
                     ctx_mgr = dspy.context(lm=selected_lm)
                 else:
-
-                    class _Noop:
-                        def __enter__(self):
-                            return None
-
-                        def __exit__(self, exc_type, exc, tb):
-                            return False
-
-                    ctx_mgr = _Noop()
+                    raise RuntimeError(
+                        "No language model (lm) is configured for DSPy call context."
+                    )
 
                 with ctx_mgr:
                     acall = getattr(module, "acall", None)
@@ -106,7 +93,7 @@ def use_dspy_call(
                         "DSPy module has no acall/apredict/predict/__call__ to invoke"
                     )
 
-            result = await _call(), ver
+            result = (await _call(), ver)
 
             if alive_ref["alive"] and task_ref["task"] is current_task:
                 dispatch({"type": "success", "result": result, "ver": ver})
@@ -115,7 +102,6 @@ def use_dspy_call(
             if alive_ref["alive"] and task_ref["task"] is current_task:
                 dispatch({"type": "error", "error": e, "ver": ver})
 
-    # -------------- Exposed API --------------
     def _run(**inputs):
         dispatch({"type": "start"})
         t = asyncio.create_task(_do_call(inputs))

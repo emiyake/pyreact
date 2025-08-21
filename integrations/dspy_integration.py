@@ -11,8 +11,8 @@ from pyreact.core.provider import create_context
 # Environment to be injected into the tree
 @dataclass
 class DSPyEnv:
-    lm: Any
     # Optional registry of models to enable per-component selection.
+    # The "default" key is always required and serves as the default LM.
     models: Dict[str, Any] = field(default_factory=dict)
     optimizer: Optional[Any] = None
     caches: Dict = field(default_factory=dict)  # (module_key -> module)
@@ -38,7 +38,6 @@ def use_dspy_env() -> DSPyEnv:
             except Exception:
                 default_lm = None
             _FALLBACK_ENV = DSPyEnv(
-                lm=default_lm or object(),
                 models={"default": default_lm} if default_lm else {},
                 optimizer=None,
             )
@@ -57,7 +56,6 @@ def DSPyProvider(
 ):
     def _factory():
         model_registry = dict(models or {})
-        # Resolve default LM: prefer explicit 'lm', otherwise from models['default']
         default_lm = lm if lm is not None else model_registry.get("default")
         if default_lm is None:
             raise ValueError(
@@ -67,7 +65,6 @@ def DSPyProvider(
         # Ensure registry has a 'default'
         model_registry.setdefault("default", default_lm)
         return DSPyEnv(
-            lm=default_lm,
             models=model_registry,
             optimizer=optimizer,
             settings=settings or {},
@@ -83,7 +80,7 @@ def DSPyProvider(
         ],
     )
     # Configure the global default LM once per env
-    dspy.configure(lm=env.lm)
+    dspy.configure(lm=env.models["default"])
 
     return [DSPyContext(value=env, children=children or [])]
 
@@ -97,7 +94,7 @@ def use_dspy_module(
     signature,  # class dspy.Signature (or string "q -> a")
     module_cls,  # e.g.: dspy.Predict / dspy.ChainOfThought
     *,
-    name: str | None = None,  # optional, to distinguish instances
+    name: Optional[str] = None,  # optional, to distinguish instances
     compile_with_optimizer: bool = False,
     deps: Optional[list] = None,  # when changed, recreate (e.g., change few-shot)
 ) -> Any:

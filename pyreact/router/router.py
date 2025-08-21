@@ -4,8 +4,23 @@ from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
 from pyreact.web.nav_service import NavService
 
-RouterContext = create_context(default={"/": None}, name="Router")
-# Exposes a read-only catalog of all declared Route patterns under the current Router
+
+# Create a fallback navigate function for when RouterContext is temporarily lost
+def _fallback_navigate(path):
+    print(f"[ROUTER DEBUG] fallback navigate: {path}")
+    try:
+        from pyreact.core.hook import HookContext
+        from pyreact.web.nav_service import NavService
+
+        navsvc = HookContext.get_service("nav_service", NavService)
+        # Update Router context and commit directly to avoid recursion
+        RouterContext.set({path: _fallback_navigate})
+        navsvc.commit(path)
+    except Exception:
+        pass
+
+
+RouterContext = create_context(default={"/": _fallback_navigate}, name="Router")
 RoutesCatalogContext = create_context(default=[], name="RoutesCatalog")
 
 
@@ -111,12 +126,7 @@ def Router(*, initial=None, children):
             final_url = _build_url(path_str, params, query, fragment)
 
             RouterContext.set({final_url: navigate})
-            svc.current = final_url
-            for fn in list(svc.subs):
-                try:
-                    fn(final_url)
-                except Exception:
-                    pass
+            svc.commit(final_url)
 
         svc.current = p
         svc.navigate = navigate
