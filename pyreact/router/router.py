@@ -5,6 +5,12 @@ from pyreact.core.provider import create_context
 from pyreact.web.nav_service import NavService
 
 RouterContext = create_context(default={"/": None}, name="Router")
+# Exposes a read-only catalog of all declared Route patterns under the current Router
+RoutesCatalogContext = create_context(default=[], name="RoutesCatalog")
+
+
+def use_routes_catalog():
+    return hooks.use_context(RoutesCatalogContext)
 
 
 def _build_url(
@@ -188,4 +194,39 @@ def Router(*, initial=None, children):
 
     selected_children = [] if selected_child is None else [selected_child]
 
-    return [RouterContext(value=router_value, children=selected_children)]
+    # Build a catalog of all declared routes to expose via context
+    routes_catalog = []
+    for ch in children:
+        component_fn = getattr(ch, "component_fn", None)
+        props = getattr(ch, "props", None)
+        if component_fn is None or props is None:
+            continue
+        if getattr(component_fn, "__name__", "") != "Route":
+            continue
+        path_pattern = props.get("path", "/")
+        exact = props.get("exact", True)
+        # Optional human-friendly name if provided alongside Route props
+        name = props.get("name", props.get("title", props.get("key", path_pattern)))
+        description = props.get("description")
+        utterances = props.get("utterances") or []
+        default_params = props.get("default_params")
+        routes_catalog.append(
+            {
+                "path": path_pattern,
+                "exact": exact,
+                "name": name,
+                "description": description,
+                "utterances": utterances,
+                # Expose as 'params' for consumers like RouterAgent
+                "params": default_params,
+            }
+        )
+
+    return [
+        RouterContext(
+            value=router_value,
+            children=[
+                RoutesCatalogContext(value=routes_catalog, children=selected_children)
+            ],
+        )
+    ]

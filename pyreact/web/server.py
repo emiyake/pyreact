@@ -34,12 +34,12 @@ _BASE_HTML = """<!doctype html>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       html,body{margin:0;padding:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu}
-      #dbg{position:fixed;top:0;left:0;right:0;display:flex;gap:.5rem;align-items:center;padding:.4rem .8rem;background:#f7f7f8;border-bottom:1px solid #e5e7eb;z-index:10}
+      #dbg{display:flex;gap:.5rem;align-items:center;padding:.4rem .8rem;background:#f7f7f8;border-bottom:1px solid #e5e7eb;z-index:10}
       #dbg button{padding:.35rem .6rem;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer}
       #dbg button:hover{background:#f3f4f6}
       #cli{position:fixed;bottom:0;left:0;right:0;padding:.6rem 1rem;border:0;border-top:1px solid #ddd;font-size:16px;outline:none}
       #root{padding:3rem 1rem 3.5rem}
-      #stdout{white-space:pre-wrap;background:#0b1020;color:#e7f0ff;padding:12px;border-radius:10px;margin:0 1rem 1rem;max-height:40vh;overflow:auto}
+      #stdout{line-height:1.5;white-space:pre-wrap;background:#0b1020;color:#e7f0ff;padding:12px;border-radius:10px;margin:0 1rem 1rem;max-height:90vh;overflow:auto}
     </style>
   </head>
   <body>
@@ -284,8 +284,6 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
     # ---------- routes ----------
     @app.get("/favicon.ico")
     async def favicon():
-        # Return a real icon with FileResponse(...) if desired.
-        # Here we just avoid SSR and a route change:
         return Response(status_code=204, media_type="image/x-icon")
 
     @app.get("/{full_path:path}")

@@ -1,10 +1,18 @@
 from integrations.dspy_integration import DSPyProvider, use_dspy_module
 from integrations.use_dspy import use_dspy_call
-from pyreact.boot import run_web, run_terminal
+from pyreact.boot import run_web
 from pyreact.components.keystroke import Keystroke
 from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
-from pyreact.router import Route, Router, use_route, use_navigate, use_query_params
+from pyreact.router import (
+    Route,
+    Router,
+    use_route,
+    use_navigate,
+    use_query_params,
+    use_routes_catalog,
+)
+from router_agent import RouterAgent as ProjectRouterAgent
 import dspy
 
 from pyreact.router.route import use_route_params
@@ -174,12 +182,29 @@ def Home():
     )
     query_text = f" Query: {query_params}" if query_params else ""
 
+    user_query, set_user_query = hooks.use_state("")
+
+    def on_nl_submit(text: str):
+        set_user_query(text)
+
+    catalog = use_routes_catalog()
+
     return [
         Text(key="h", text=f"🏠 Home{id_text}{query_text}"),
         Text(
             key="help", text="Press 'a' for about, 'q' for qa, 'd' for dict navigation"
         ),
         Keystroke(key="nav", on_submit=handle_navigate_with_params),
+        Text(
+            key="nl1",
+            text="Digite um comando natural para navegar (ex: 'ir para about' ou 'abrir QA') e pressione Enter:",
+        ),
+        Keystroke(key="nl", on_submit=on_nl_submit),
+        ProjectRouterAgent(key="agent-router", message=user_query),
+        Print(
+            key="catalog",
+            text=f"Rotas disponíveis: {[r.get('name') or r['path'] for r in (catalog or [])]}",
+        ),
     ]
 
 
@@ -224,12 +249,45 @@ def NotFound():
 def App():
     return [
         Router(
-            initial="/qa",
+            initial="/",
             children=[
-                Route(key="r1", path="/home/:id", children=[Home(key="home")]),
-                Route(key="r2", path="/about", children=[About(key="about")]),
-                Route(key="r3", path="/qa", children=[QAHome(key="qa")]),
-                Route(key="r4", path="/", children=[Home(key="home")]),
+                Route(
+                    key="r1",
+                    path="/home/:id",
+                    name="home",
+                    description="Página inicial com informações gerais",
+                    utterances=["ir para home", "abrir página inicial"],
+                    default_params={"id": "1"},
+                    children=[Home(key="home")],
+                ),
+                Route(
+                    key="r2",
+                    path="/about",
+                    name="about",
+                    description="Sobre o aplicativo e documentação",
+                    utterances=["ir para sobre", "abrir about"],
+                    children=[About(key="about")],
+                ),
+                Route(
+                    key="r3",
+                    path="/qa",
+                    name="qa",
+                    description="Perguntas e respostas assistidas por LLM",
+                    utterances=[
+                        "Dúvidas sobre contratos",
+                        "Dúvdias sobre pagamento",
+                        "perguntar",
+                    ],
+                    children=[QAHome(key="qa")],
+                ),
+                Route(
+                    key="r4",
+                    path="/",
+                    name="root",
+                    description="Rota raiz (redirect para Home)",
+                    utterances=["início", "raiz"],
+                    children=[Home(key="home")],
+                ),
             ],
         )
     ]
