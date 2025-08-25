@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Tuple, Optional
 import asyncio
 import dspy
-
+import os
 from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
 
@@ -20,28 +20,16 @@ class DSPyEnv:
     settings: Dict = field(default_factory=dict)  # free for flags (timeout, etc.)
 
 
+# Create DSPy context - will be automatically managed by create_context
 DSPyContext = create_context(default=None, name="DSPy")
-
-# Optional global fallback when a provider is not mounted.
-_FALLBACK_ENV: Optional["DSPyEnv"] = None
 
 
 def use_dspy_env() -> DSPyEnv:
     env = hooks.use_context(DSPyContext)
     if env is None:
-        # Lazily create a fallback environment to avoid hard crashes during SSR or early renders
-        # when the provider has not yet mounted. This still allows per-call LM override via use_dspy_call.
-        global _FALLBACK_ENV
-        if _FALLBACK_ENV is None:
-            try:
-                default_lm = dspy.LM("openai/gpt-4o-mini")
-            except Exception:
-                default_lm = None
-            _FALLBACK_ENV = DSPyEnv(
-                models={"default": default_lm} if default_lm else {},
-                optimizer=None,
-            )
-        return _FALLBACK_ENV
+        raise RuntimeError(
+            "DSPyProvider is not mounted. Please ensure DSPyProvider is configured."
+        )
     return env
 
 
@@ -64,23 +52,23 @@ def DSPyProvider(
 
         # Ensure registry has a 'default'
         model_registry.setdefault("default", default_lm)
-        return DSPyEnv(
+        env = DSPyEnv(
             models=model_registry,
             optimizer=optimizer,
             settings=settings or {},
         )
+        return env
 
-    env = hooks.use_memo(
-        _factory,
-        deps=[
-            lm,
-            models and id(models),
-            optimizer,
-            tuple(sorted((settings or {}).items())),
-        ],
-    )
+    # Create environment directly without use_memo to avoid re-creation issues
+    env = _factory()
+
     # Configure the global default LM once per env
-    dspy.configure(lm=env.models["default"])
+    if env.models.get("default"):
+        try:
+            dspy.configure(lm=env.models["default"])
+        except Exception:
+            # If configuration fails, continue without global configuration
+            pass
 
     return [DSPyContext(value=env, children=children or [])]
 

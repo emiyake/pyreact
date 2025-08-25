@@ -4,7 +4,7 @@ from typing import Optional, Any
 import inspect
 import dspy
 from pyreact.core.core import hooks
-from integrations.dspy_integration import DSPyContext
+from integrations.dspy_integration import use_dspy_env
 
 
 def use_dspy_call(
@@ -54,18 +54,20 @@ def use_dspy_call(
 
     hooks.use_effect(_mount_cleanup, [])
 
+    # Get environment during render (not in async function)
+    env = use_dspy_env()
+
     async def _do_call(inputs: dict):
         current_task = asyncio.current_task()
 
         try:
             ver = id(inspect.currentframe())
-            env = DSPyContext.get()
             if lm is not None:
                 selected_lm = lm
             elif env is not None and model is not None:
-                selected_lm = env.models.get(model, env.models["default"])
+                selected_lm = env.models.get(model, env.models.get("default"))
             elif env is not None:
-                selected_lm = env.models["default"]
+                selected_lm = env.models.get("default")
             else:
                 selected_lm = None  # fall back to dspy global default if configured
 
@@ -73,9 +75,22 @@ def use_dspy_call(
                 if selected_lm is not None:
                     ctx_mgr = dspy.context(lm=selected_lm)
                 else:
-                    raise RuntimeError(
-                        "No language model (lm) is configured for DSPy call context."
-                    )
+                    # Provide more helpful error message for SSR scenarios
+                    if env is None:
+                        raise RuntimeError(
+                            "DSPy context not available. This may happen during server-side rendering. "
+                            "Please ensure DSPyProvider is properly configured with API keys."
+                        )
+                    elif not env.models.get("default"):
+                        raise RuntimeError(
+                            "DSPy provider not fully initialized. This is normal during server-side rendering. "
+                            "The application will work correctly once the client-side JavaScript loads."
+                        )
+                    else:
+                        raise RuntimeError(
+                            f"No language model configured. Available models: {list(env.models.keys())}. "
+                            "Please check your DSPyProvider configuration."
+                        )
 
                 with ctx_mgr:
                     acall = getattr(module, "acall", None)

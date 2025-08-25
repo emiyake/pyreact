@@ -135,3 +135,27 @@ def run_terminal(app_component_fn, *, fps: int = 20, prompt: str = ">> "):
             pass
 
     asyncio.run(_main())
+
+
+async def read_terminal_and_invoke(app, *, prompt: str = ">> ", wait: bool = True):
+    """Minimal async loop that reads lines from stdin and forwards to app.invoke().
+
+    - Reading happens via run_in_executor to avoid blocking the event loop.
+    - Stop the loop by sending :q / :quit / :exit (case-sensitive) or Ctrl+C.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        while True:
+            txt = await loop.run_in_executor(None, input, prompt)
+            s = (txt or "").strip()
+            if s in (":q", ":quit", ":exit"):
+                break
+            try:
+                ret = app.invoke(txt, wait=wait)
+                if ret:
+                    print(ret)
+            except Exception:
+                # Keep the loop resilient to user code errors
+                pass
+    except (KeyboardInterrupt, SystemExit):
+        pass

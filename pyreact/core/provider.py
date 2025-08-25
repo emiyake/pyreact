@@ -5,6 +5,9 @@ from weakref import WeakSet
 from pyreact.core.core import component, hooks
 from pyreact.core.runtime import schedule_rerender
 
+# Global registry to prevent ContextVar instances from being garbage collected
+_CONTEXT_REGISTRY = {}
+
 
 def provider(ctx_var, *, prop="value"):
     def decorator(body_fn):
@@ -32,6 +35,11 @@ def provider(ctx_var, *, prop="value"):
 
 
 def create_context(*, default=None, name="Context", prop="value"):
+    # Check if context already exists in registry
+    context_key = f"{name}_{id(default) if default is not None else 'None'}"
+    if context_key in _CONTEXT_REGISTRY:
+        return _CONTEXT_REGISTRY[context_key]
+
     ctx_var = ContextVar(name, default=default)
     subs_set = WeakSet()
 
@@ -72,4 +80,9 @@ def create_context(*, default=None, name="Context", prop="value"):
         def __repr__(self):
             return f"<Context {name!r} default={default!r}>"
 
-    return _Context()
+    context_instance = _Context()
+
+    # Register the context to prevent garbage collection
+    _CONTEXT_REGISTRY[context_key] = context_instance
+
+    return context_instance

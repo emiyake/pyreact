@@ -1,9 +1,10 @@
-from pyreact.boot import run_web
+from pyreact.boot import run_app, read_terminal_and_invoke
 from pyreact.core.core import component
 from components import Root
 import os
 import dotenv
 import dspy
+import asyncio
 
 
 @component
@@ -17,9 +18,9 @@ def Boot():
         "fast": lm_fast,
         "reasoning": lm_default,
     }
-
     return [Root(key="root", models=models)]
 
 
 if __name__ == "__main__":
-    run_web(Boot, host="127.0.0.1", port=8000)
+    myapp = run_app(Boot, fps=20)
+    asyncio.run(read_terminal_and_invoke(myapp, prompt="> ", wait=True))
