@@ -1,5 +1,7 @@
 from integrations.dspy_integration import DSPyProvider, use_dspy_module
 from integrations.use_dspy import use_dspy_call
+from log import Log
+from message import Message
 from pyreact.components.keystroke import Keystroke
 from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
@@ -44,17 +46,10 @@ class ConvertDates(dspy.Signature):
 
 
 class QASig(dspy.Signature):
-    """Responda em uma frase, de forma direta."""
+    """Answer in one sentence, directly."""
 
     question: str = dspy.InputField()
     answer: str = dspy.OutputField()
-
-
-@component
-def Log(text: str, trigger: str = "change"):
-    deps = [] if trigger == "mount" else [text]
-    hooks.use_effect(lambda: print(text), deps)
-    return []
 
 
 @component
@@ -67,7 +62,9 @@ def GuardRail(question, children):
             instructions="Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks.",
         )
     )
-    check_toxicity, result_toxicity, loading, _ = use_dspy_call(toxicity, model="fast")
+    check_toxicity, result_toxicity, loading, error = use_dspy_call(
+        toxicity, model="fast"
+    )
 
     def _check_toxicity():
         if not question.strip():
@@ -93,17 +90,37 @@ def GuardRail(question, children):
 
     hooks.use_effect(_maybe_redirect, [ver, redirected_ver, result_toxicity])
 
+    # If toxicity check errored, do not block QA – continue and warn
+    if error:
+        return [
+            Message(
+                key="toxicity-check-failed",
+                text="Não foi possível verificar toxicidade. Continuando.",
+                sender="system",
+                message_type="warning",
+            )
+        ] + (children or [])
+
+    if loading:
+        return [
+            Message(
+                key="loading",
+                text="Consultando o modelo…",
+                sender="system",
+                message_type="info",
+            )
+        ]
+
     if result_toxicity is None or ver != (result_toxicity or [None, None])[1]:
         return []
 
-    if loading:
-        return [Log(key="loading", text="Consultando o modelo…")]
-
     if getattr(result_toxicity[0], "toxic", False):
         return [
-            Log(
+            Message(
                 key=f"toxic-{result_toxicity[1]}",
                 text="Esta pergunta é considerada tóxica",
+                sender="system",
+                message_type="warning",
             )
         ]
     else:
@@ -123,15 +140,36 @@ def QAAgent(question: str):
     hooks.use_effect(_call_dspy, [question])
 
     if loading:
-        print("Carregando... Aguarde.")
+        return [
+            Message(
+                key="loading",
+                text="Carregando... Aguarde.",
+                sender="system",
+                message_type="info",
+            )
+        ]
 
     if error:
-        return [Log(key="error", text=f"Error: {error}")]
+        return [
+            Message(
+                key="error",
+                text=f"Erro: {error}",
+                sender="system",
+                message_type="error",
+            )
+        ]
 
     if result is None:
         return []
 
-    return [Log(key="agent", text=f"Response: {getattr(result[0], 'answer', None)}")]
+    return [
+        Message(
+            key="agent",
+            text=f"{getattr(result[0], 'answer', None)}",
+            sender="assistant",
+            message_type="chat",
+        )
+    ]
 
 
 @component
@@ -144,6 +182,12 @@ def QAHome():
         set_last_message(line)
 
     return [
+        Message(
+            key="welcome",
+            text="Olá! Como posso ajudá-lo hoje?",
+            sender="assistant",
+            message_type="info",
+        ),
         Log(key="hint", text="Digite sua pergunta e pressione Enter…"),
         Keystroke(key="qa_input", on_submit=on_enter),
         GuardRail(
@@ -154,17 +198,18 @@ def QAHome():
     ]
 
 
-# Text was merged into Log with trigger="mount"
-
-
 @component
 def Home():
     route_params = use_route_params()
     query_params = use_query_params()
     navigate = use_navigate()
+    user_query, set_user_query = hooks.use_state("")
+    catalog = use_routes_catalog()
 
-    print("Route params:", route_params)
-    print("Query params:", query_params)
+    hooks.use_effect(
+        lambda: print(f"Params: {route_params}, Query: {query_params}"),
+        [route_params, query_params],
+    )
 
     def handle_navigate_with_params(k):
         if k == "a":
@@ -182,33 +227,34 @@ def Home():
                     "fragment": "section1",
                 }
             )
+        else:
+            set_user_query(k)
 
     id_text = (
         f" (ID: {route_params.get('id', 'none')})" if route_params.get("id") else ""
     )
     query_text = f" Query: {query_params}" if query_params else ""
 
-    user_query, set_user_query = hooks.use_state("")
-
-    def on_nl_submit(text: str):
-        set_user_query(text)
-
-    catalog = use_routes_catalog()
-
     return [
-        Log(key="h", text=f"🏠 Home{id_text}{query_text}", trigger="mount"),
+        Message(
+            key="welcome",
+            text=f"🏠 Bem-vindo ao Home{id_text}{query_text}",
+            sender="system",
+            message_type="info",
+        ),
         Log(
             key="help",
             text="Press 'a' for about, 'q' for qa, 'd' for dict navigation",
             trigger="mount",
         ),
         Keystroke(key="nav", on_submit=handle_navigate_with_params),
-        Log(
-            key="nl1",
+        Message(
+            key="instruction",
             text="Digite um comando natural para navegar (ex: 'ir para about' ou 'abrir QA') e pressione Enter:",
+            sender="assistant",
+            message_type="info",
             trigger="mount",
         ),
-        Keystroke(key="nl", on_submit=on_nl_submit),
         ProjectRouterAgent(key="agent-router", message=user_query),
         Log(
             key="catalog",
@@ -304,12 +350,13 @@ def App():
 
 
 @component
-def Root():
-    lm_default = dspy.LM("openai/gpt-4o", api_key=OPENAI_API_KEY)
-    lm_fast = dspy.LM("openai/gpt-4o-mini", api_key=OPENAI_API_KEY)
-    models = {
-        "default": lm_default,
-        "fast": lm_fast,
-        "reasoning": lm_default,
-    }
+def Root(models=None):
+    if models is None:
+        lm_default = dspy.LM("openai/gpt-4o", api_key=OPENAI_API_KEY)
+        lm_fast = dspy.LM("openai/gpt-4o-mini", api_key=OPENAI_API_KEY)
+        models = {
+            "default": lm_default,
+            "fast": lm_fast,
+            "reasoning": lm_default,
+        }
     return [DSPyProvider(key="dspy", models=models, children=[App(key="app")])]

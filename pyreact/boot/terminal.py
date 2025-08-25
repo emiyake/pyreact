@@ -63,14 +63,12 @@ def run_terminal(app_component_fn, *, fps: int = 20, prompt: str = ">> "):
         def _print_current_route(_args: str = ""):
             try:
                 navsvc = HookContext.get_service("nav_service", NavService)
-                url = getattr(navsvc, "current", "/")
                 BOLD = "\x1b[1m"
                 CYAN = "\x1b[36m"
                 RESET = "\x1b[0m"
                 GRAY = "\x1b[90m"
                 YELLOW = "\x1b[33m"
                 print(f"\n{BOLD}{CYAN}=== Route ==={RESET}")
-                print(f"{GRAY}url:{RESET} {YELLOW}{url}{RESET}")
                 try:
                     path = navsvc.get_path()
                     params = navsvc.get_query_params()

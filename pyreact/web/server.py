@@ -6,16 +6,25 @@ import time
 from contextlib import asynccontextmanager
 from typing import Optional, Set
 
-from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, Response, WebSocket, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from pyreact.core.hook import HookContext
 from pyreact.core.runtime import schedule_rerender, run_renders, get_render_signal
 from pyreact.web.nav_service import NavService
 from pyreact.web.renderer import render_to_html
 from pyreact.input.bus import InputBus
-from pyreact.web.console import ConsoleBuffer, enable_web_print, disable_web_print
+from pyreact.web.console import (
+    ConsoleBuffer,
+    enable_web_print,
+    disable_web_print,
+    _original_stdout,
+)
 from pyreact.web.ansi import ansi_to_html
+from pyreact.web.broadcast import InMemoryBroadcast
+from pyreact.web.ws_endpoint import register_ws_routes
 
 
 # -------------------------
@@ -25,6 +34,16 @@ _WS_CLIENTS: Set[WebSocket] = set()
 _pending_path: Optional[str] = None  # pending navigation until Router mounts
 _ROOT_CTX: Optional[HookContext] = None  # global pointer for debug helpers
 
+# Pub/Sub broadcast (in-memory)
+broadcast = InMemoryBroadcast()
+
+# Channel names
+CHAN_HTML = "html"
+CHAN_NAV = "nav"
+CHAN_STDOUT = "stdout"
+CHAN_MSG = "message"
+CHAN_INPUT = "input"
+
 
 _BASE_HTML = """<!doctype html>
 <html>
@@ -32,140 +51,128 @@ _BASE_HTML = """<!doctype html>
     <meta charset="utf-8" />
     <title>Reaktiv App</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <style>
       html,body{margin:0;padding:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu}
-      #dbg{position:fixed;top:0;left:0;right:0;display:flex;gap:.5rem;align-items:center;padding:.4rem .8rem;background:#f7f7f8;border-bottom:1px solid #e5e7eb;z-index:10}
-      #dbg button{padding:.35rem .6rem;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer}
-      #dbg button:hover{background:#f3f4f6}
-      #cli{position:fixed;bottom:0;left:0;right:0;padding:.6rem 1rem;border:0;border-top:1px solid #ddd;font-size:16px;outline:none}
-      #root{padding:3rem}
-      #stdout{margin-top: 50px;line-height:1.5;white-space:pre-wrap;background:#0b1020;color:#e7f0ff;padding:12px;border-radius:10px;margin:0 1rem 1rem;max-height:80vh;overflow:auto}
+      
+      /* Chat message styles */
+      .chat-message {
+        display: flex;
+        margin-bottom: 8px;
+        animation: fadeIn 0.3s ease-in;
+      }
+      
+      .chat-message.user {
+        justify-content: flex-end;
+      }
+      
+      .chat-message.system {
+        justify-content: center;
+      }
+      
+      .chat-message.assistant {
+        justify-content: flex-start;
+      }
+      
+      .message-bubble {
+        max-width: 70%;
+        padding: 12px 16px;
+        border-radius: 18px;
+        word-wrap: break-word;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      }
+      
+      .chat-message.user .message-bubble {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-bottom-right-radius: 4px;
+      }
+      
+      .chat-message.assistant .message-bubble {
+        background: #f1f5f9;
+        color: #1e293b;
+        border: 1px solid #e2e8f0;
+        border-bottom-left-radius: 4px;
+      }
+      
+      .chat-message.system .message-bubble {
+        background: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fde68a;
+        font-size: 0.9em;
+        font-style: italic;
+      }
+      
+      .message-bubble.info {
+        background: #dbeafe !important;
+        color: #1e40af !important;
+        border-color: #93c5fd !important;
+      }
+      
+      .message-bubble.warning {
+        background: #fef3c7 !important;
+        color: #92400e !important;
+        border-color: #fde68a !important;
+      }
+      
+      .message-bubble.error {
+        background: #fee2e2 !important;
+        color: #991b1b !important;
+        border-color: #fca5a5 !important;
+      }
+      
+      .message-sender {
+        font-size: 0.75em;
+        margin-bottom: 4px;
+        opacity: 0.7;
+        font-weight: 500;
+      }
+      
+      .log-entry {
+        background: #0b1020;
+        color: #e7f0ff;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-family: monospace;
+        font-size: 14px;
+        line-height: 1.4;
+        margin-bottom: 4px;
+        animation: fadeIn 0.3s ease-in;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        overflow-x: auto;
+      }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
     </style>
   </head>
-  <body>
-    <div id="dbg">
-      <button id="dbg-tree">Print VNode Tree (Ctrl+V)</button>
-      <button id="dbg-trace">Print Render Trace (Ctrl+T)</button>
-      <label style="display:inline-flex;align-items:center;gap:.4rem;font-size:14px">
+  <body class="m-0 p-0 font-sans">
+    <div id="dbg"
+      class="fixed top-0 left-0 right-0 flex gap-2 items-center py-2 px-3 bg-[#f7f7f8] border-b border-[#e5e7eb] z-10">
+      <button id="dbg-tree"
+        class="px-3 py-1 border border-gray-300 rounded-[6px] bg-white cursor-pointer hover:bg-gray-100 transition-colors">
+        Print VNode Tree (Ctrl+V)
+      </button>
+      <button id="dbg-trace"
+        class="px-3 py-1 border border-gray-300 rounded-[6px] bg-white cursor-pointer hover:bg-gray-100 transition-colors">
+        Print Render Trace (Ctrl+T)
+      </button>
+      <label
+        class="inline-flex items-center gap-2 text-[14px]">
         <input type="checkbox" id="dbg-trace-enable" /> enable tracing
       </label>
     </div>
-    <pre id="stdout">{STDOUT}</pre>
-    <div id="root">{SSR}</div>
-    <input id="cli" placeholder="type and press Enter…" autofocus />
-    <script>
-      (function(){
-        const proto = (location.protocol === 'https:') ? 'wss://' : 'ws://';
-        const cli = document.getElementById('cli');
-        const pre = document.getElementById('stdout');
-        const dbgTreeBtn = document.getElementById('dbg-tree');
-        const dbgTraceBtn = document.getElementById('dbg-trace');
-        const dbgTraceEnable = document.getElementById('dbg-trace-enable');
-
-        let ws;
-        let retries = 0;
-        const maxDelay = 10000; // 10s cap
-        let heartbeat;
-
-        function scrollToBottom(el){ try{ el.scrollTop = el.scrollHeight; }catch{} }
-        function isOpen() { return ws && ws.readyState === WebSocket.OPEN; }
-
-        function connect() {
-          ws = new WebSocket(proto + location.host + '/ws');
-
-          ws.onopen = () => {
-            retries = 0;
-            try { ws.send(JSON.stringify({t:'hello', path: location.pathname})); } catch {}
-            clearInterval(heartbeat);
-            heartbeat = setInterval(() => {
-              try { if (isOpen()) ws.send(JSON.stringify({t:'ping', ts: Date.now()})); } catch {}
-            }, 25000);
-          };
-
-          ws.onmessage = (ev) => {
-            try {
-              const msg = JSON.parse(ev.data);
-              if (msg.type === 'html') {
-                document.getElementById('root').innerHTML = msg.html;
-                return;
-              }
-              if (msg.type === 'nav') {
-                if (location.pathname !== msg.path) history.pushState({}, '', msg.path);
-                return;
-              }
-              if (msg.type === 'stdout') {
-                pre.innerHTML += msg.html;
-                scrollToBottom(pre);
-                return;
-              }
-            } catch {
-              // compatibility: legacy payload with raw HTML
-              document.getElementById('root').innerHTML = ev.data;
-            }
-          };
-
-          ws.onclose = () => {
-            clearInterval(heartbeat);
-            retries += 1;
-            const delay = Math.min(1000 * Math.pow(2, retries - 1), maxDelay) + Math.random() * 500;
-            setTimeout(connect, delay);
-          };
-
-          ws.onerror = () => {
-            try { ws.close(); } catch {}
-          };
-        }
-
-        connect();
-
-        // Back/forward → server
-        window.addEventListener('popstate', () => {
-          try { if (isOpen()) ws.send(JSON.stringify({t:'nav', path: location.pathname})); } catch {}
-        });
-
-        // Input field (Keystroke → InputBus)
-        cli.addEventListener('input', (e) => {
-          try { if (isOpen()) ws.send(JSON.stringify({t:'text', v: e.target.value})); } catch {}
-        });
-        cli.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-            try { if (isOpen()) ws.send(JSON.stringify({t:'submit', v: cli.value})); } catch {}
-            cli.value = '';
-            // keep focus and auto-scroll pre
-            cli.focus();
-            scrollToBottom(pre);
-          }
-        });
-
-        // Debug: print VNode tree
-        if (dbgTreeBtn) {
-          dbgTreeBtn.addEventListener('click', () => {
-            try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'tree'})); } catch {}
-          });
-        }
-        if (dbgTraceBtn) {
-          dbgTraceBtn.addEventListener('click', () => {
-            try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'trace'})); } catch {}
-          });
-        }
-        if (dbgTraceEnable) {
-          dbgTraceEnable.addEventListener('change', (e) => {
-            try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what: e.target.checked ? 'enable_trace':'disable_trace'})); } catch {}
-          });
-        }
-        document.addEventListener('keydown', (e) => {
-          const key = (e.key || '').toLowerCase();
-          if ((e.ctrlKey || e.metaKey) && key === 'v') {
-            e.preventDefault();
-            try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'tree'})); } catch {}
-          }
-          if ((e.ctrlKey || e.metaKey) && key === 't') {
-            e.preventDefault();
-            try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'trace'})); } catch {}
-          }
-        });
-      })();
-    </script>
+    <div id="chat-container" class="mt-[60px] mx-4 mb-4 max-h-[80vh] overflow-auto">
+      <div id="chronological-output" class="space-y-2"></div>
+    </div>
+    <div id="root" class="p-4">{SSR}</div>
+    <input id="cli"
+      class="fixed bottom-0 left-0 right-0 py-2 px-4 border-0 border-t border-gray-300 text-[16px] outline-none"
+      placeholder="type and press Enter…" autofocus />
+    <script src="/static/app.js"></script>
   </body>
 </html>"""
 
@@ -175,45 +182,81 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
     Returns ``(app, root_ctx)``.
     """
     app = FastAPI()
+    # Serve static assets (JS/CSS) from the package's static directory
+    static_dir = Path(__file__).parent / "static"
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     root_ctx = HookContext(app_component_fn.__name__, app_component_fn)
     global _ROOT_CTX
     _ROOT_CTX = root_ctx
 
     # ---------- local helpers (use root_ctx) ----------
 
-    async def _broadcast_html(html_now: str) -> None:
-        payload = json.dumps({"type": "html", "html": html_now})
-        dead = []
-        for ws in list(_WS_CLIENTS):
-            try:
-                await ws.send_text(payload)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            _WS_CLIENTS.discard(ws)
+    async def publish_html(html_now: str) -> None:
+        payload = json.dumps({"channel": "ui", "type": "html", "html": html_now})
+        await broadcast.publish(CHAN_HTML, payload)
 
-    async def _broadcast_nav(path: str) -> None:
-        payload = json.dumps({"type": "nav", "path": path})
-        dead = []
-        for ws in list(_WS_CLIENTS):
-            try:
-                await ws.send_text(payload)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            _WS_CLIENTS.discard(ws)
+    async def publish_nav(path: str) -> None:
+        payload = json.dumps({"channel": "ui", "type": "nav", "path": path})
+        await broadcast.publish(CHAN_NAV, payload)
 
     async def _broadcast_stdout(text: str) -> None:
-        # Convert ANSI to HTML for colored output in browser
-        payload = json.dumps({"type": "stdout", "html": ansi_to_html(text)})
-        dead = []
-        for ws in list(_WS_CLIENTS):
+        # Check if this is a special message format
+        if text.startswith("__MESSAGE__:"):
+            # Extract the JSON message data
             try:
-                await ws.send_text(payload)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            _WS_CLIENTS.discard(ws)
+                message_json = text[12:]  # Remove "__MESSAGE__:" prefix
+                message_data = json.loads(message_json)
+
+                # Format for terminal output
+                sender_colors = {
+                    "user": "\x1b[34m",  # Azul
+                    "system": "\x1b[90m",  # Cinza
+                    "assistant": "\x1b[32m",  # Verde
+                }
+                type_colors = {
+                    "chat": "",
+                    "info": "\x1b[36m",  # Ciano
+                    "warning": "\x1b[33m",  # Amarelo
+                    "error": "\x1b[31m",  # Vermelho
+                }
+
+                sender = message_data.get("sender", "user")
+                message_type = message_data.get("message_type", "chat")
+                message_text = message_data.get("text", "")
+
+                color = sender_colors.get(sender, "") + type_colors.get(
+                    message_type, ""
+                )
+                reset = "\x1b[0m"
+
+                # Print to terminal (original stdout)
+                formatted_text = f"{color}[{sender.upper()}] {message_text}{reset}\n"
+                if _original_stdout:
+                    _original_stdout.write(formatted_text)
+                    _original_stdout.flush()
+
+                # Send as a special message type to web clients (chat channel)
+                payload = json.dumps(
+                    {"channel": "chat", "type": "message", "data": message_data}
+                )
+
+            except json.JSONDecodeError:
+                # Fallback to regular stdout if JSON parsing fails
+                payload = json.dumps(
+                    {"channel": "logs", "type": "stdout", "html": ansi_to_html(text)}
+                )
+        else:
+            # Convert ANSI to HTML for colored output in browser
+            payload = json.dumps(
+                {"channel": "logs", "type": "stdout", "html": ansi_to_html(text)}
+            )
+        try:
+            if text.startswith("__MESSAGE__:"):
+                await broadcast.publish(CHAN_MSG, payload)
+                return
+        except Exception:
+            pass
+        await broadcast.publish(CHAN_STDOUT, payload)
 
     # --------- debug helpers ---------
     def print_vnode_tree() -> None:
@@ -221,15 +264,59 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         if ctx is None:
             print("\x1b[90m[debug]\x1b[0m VNode tree not available yet.")
             return
-        print("\n\x1b[1m\x1b[36m=== VNode Tree ===\x1b[0m")
-        ctx.render_tree()
-        print("\x1b[1m\x1b[36m==================\x1b[0m\n")
+
+        # Capture the VNode tree output as a single block
+        import io
+        import sys
+
+        # Capture stdout temporarily
+        old_stdout = sys.stdout
+        captured_output = io.StringIO()
+        sys.stdout = captured_output
+
+        try:
+            print("\n\x1b[1m\x1b[36m=== VNode Tree ===\x1b[0m")
+            ctx.render_tree()
+            print("\x1b[1m\x1b[36m==================\x1b[0m\n")
+
+            # Get the captured output as a single string
+            vnode_output = captured_output.getvalue()
+
+            # Send as a single log entry
+            console = HookContext.get_service("console_buffer", ConsoleBuffer)
+            console.append(vnode_output)
+
+        finally:
+            # Restore stdout
+            sys.stdout = old_stdout
 
     def print_render_trace() -> None:
         try:
             from pyreact.core.debug import print_last_trace
 
-            print_last_trace()
+            # Capture the render trace output as a single block
+            import io
+            import sys
+
+            # Capture stdout temporarily
+            old_stdout = sys.stdout
+            captured_output = io.StringIO()
+            sys.stdout = captured_output
+
+            try:
+                print_last_trace()
+
+                # Get the captured output as a single string
+                trace_output = captured_output.getvalue()
+
+                # Send as a single log entry
+                console = HookContext.get_service("console_buffer", ConsoleBuffer)
+                console.append(trace_output)
+
+            finally:
+                # Restore stdout
+                sys.stdout = old_stdout
+
         except Exception:
             print("\x1b[90m[debug]\x1b[0m render trace not available.")
 
@@ -275,7 +362,7 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                 prev_html = html_now
                 latest_html = html_now
                 html_updated_event.set()
-                await _broadcast_html(html_now)
+                await publish_html(html_now)
 
     # ---------- lifespan (startup/shutdown) ----------
     @asynccontextmanager
@@ -295,7 +382,7 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         navsvc = HookContext.get_service("nav_service", NavService)
 
         async def _nav_push(path: str):
-            await _broadcast_nav(path)
+            await publish_nav(path)
 
         def _nav_listener(path: str):
             asyncio.create_task(_nav_push(path))
@@ -305,6 +392,7 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         # 4. First render will be scheduled now that there's an event loop
         schedule_rerender(root_ctx, reason="server startup")
         render_task = asyncio.create_task(_render_loop())
+        input_task = asyncio.create_task(_input_consumer())
 
         # 5. Initial SSR will already use stdout accumulated so far
         app.state._cleanup = {
@@ -313,6 +401,7 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             "navsvc": navsvc,
             "nav_listener": _nav_listener,
             "render_task": render_task,
+            "input_task": input_task,
         }
 
         try:
@@ -329,6 +418,10 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                 pass
             try:
                 render_task.cancel()
+            except Exception:
+                pass
+            try:
+                input_task.cancel()
             except Exception:
                 pass
             disable_web_print()
@@ -360,42 +453,95 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         ssr_html = latest_html or render_to_html(root_ctx)
         html_updated_event.clear()
 
-        console = HookContext.get_service("console_buffer", ConsoleBuffer)
-        stdout_ssr = ansi_to_html(console.dump())
+        # Don't include any stdout content in SSR - let WebSocket handle everything in chronological order
+        stdout_ssr = ""
 
         return HTMLResponse(
             _BASE_HTML.replace("{SSR}", ssr_html).replace("{STDOUT}", stdout_ssr)
         )
 
-    @app.websocket("/ws")
-    async def ws_endpoint(ws: WebSocket):
-        await ws.accept()
-        _WS_CLIENTS.add(ws)
+    def _backlog_payloads() -> list[str]:
+        payloads: list[str] = []
         try:
-            while True:
-                raw = await ws.receive_text()
+            console = HookContext.get_service("console_buffer", ConsoleBuffer)
+            stdout_lines = console.dump().split("\n")
+            for line in stdout_lines:
+                if line.startswith("__MESSAGE__:"):
+                    try:
+                        message_json = line[12:]
+                        message_data = json.loads(message_json)
+                        payloads.append(
+                            json.dumps(
+                                {
+                                    "channel": "chat",
+                                    "type": "message",
+                                    "data": message_data,
+                                }
+                            )
+                        )
+                    except json.JSONDecodeError:
+                        pass
+                elif line.strip():
+                    payloads.append(
+                        json.dumps(
+                            {
+                                "channel": "logs",
+                                "type": "stdout",
+                                "html": ansi_to_html(line + "\n"),
+                            }
+                        )
+                    )
+        except Exception:
+            pass
+        return payloads
+
+    register_ws_routes(
+        app,
+        broadcast=broadcast,
+        backlog_provider=_backlog_payloads,
+        channels_to_forward=[CHAN_HTML, CHAN_NAV, CHAN_STDOUT, CHAN_MSG],
+        input_channel=CHAN_INPUT,
+        clients_set=_WS_CLIENTS,
+    )
+
+    async def _input_consumer():
+        async with broadcast.subscribe(CHAN_INPUT) as subscriber:
+            async for event in subscriber:
+                raw = event.message
                 try:
                     msg = json.loads(raw)
                 except Exception:
                     continue
-
                 t = msg.get("t")
                 if t in ("hello", "nav"):
                     await _maybe_navigate(msg.get("path", "/"))
                 elif t in ("text", "submit"):
                     bus = HookContext.get_service("input_bus", InputBus)
-                    bus.emit(
-                        {
-                            "type": t,
-                            "value": msg.get("v", ""),
-                            "source": "web",
-                            "ts": time.time(),
+                    value = msg.get("v", "")
+
+                    if t == "submit" and value.strip():
+                        user_message_data = {
+                            "type": "message",
+                            "text": value,
+                            "sender": "user",
+                            "message_type": "chat",
+                            "timestamp": time.time(),
                         }
+                        user_payload = json.dumps(
+                            {
+                                "channel": "chat",
+                                "type": "message",
+                                "data": user_message_data,
+                            }
+                        )
+                        await broadcast.publish(CHAN_MSG, user_payload)
+
+                    bus.emit(
+                        {"type": t, "value": value, "source": "web", "ts": time.time()}
                     )
                 elif t == "debug":
                     what = msg.get("what")
                     if what == "tree":
-                        # Print VNode tree to stdout (will be streamed to browser)
                         print_vnode_tree()
                     elif what == "trace":
                         print_render_trace()
@@ -416,9 +562,5 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                             print("\x1b[90m[debug]\x1b[0m tracing disabled.")
                         except Exception:
                             print("\x1b[90m[debug]\x1b[0m could not disable tracing.")
-        except WebSocketDisconnect:
-            _WS_CLIENTS.discard(ws)
-        except Exception:
-            _WS_CLIENTS.discard(ws)
 
     return app, root_ctx

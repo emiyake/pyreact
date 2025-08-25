@@ -5,6 +5,7 @@ from pyreact.core.core import component, hooks
 from pyreact.router import use_route, use_routes_catalog
 from integrations.use_dspy import use_dspy_call
 from integrations.dspy_integration import use_dspy_module
+from log import Log
 
 
 def _is_parametrized(path: str) -> bool:
@@ -20,19 +21,19 @@ def RouterAgent(
     children=None,
 ):
     """
-    Decides a route from a free-text `message` and navigates to it.
+    Decide a route from a free-text `message` and navigate to it.
 
-    - Reads available routes from context via `use_routes_catalog()`.
-    - Optionally merges additional metadata: description, utterances, default params.
+    - Read available routes from context via `use_routes_catalog()`.
+    - Optionally merge additional metadata: description, utterances, default params.
     - If a `resolver(message, candidates)` is provided, its return (path) wins.
-    - Otherwise, applies heuristic scoring against names, paths, descriptions, utterances.
+    - Otherwise, apply heuristic scoring against names, paths, descriptions, utterances.
 
-    routes_meta item example:
+    Example `routes_meta` item:
         {
           "path": "/about",
           "name": "about",
-          "description": "Informações sobre o app",
-          "utterances": ["ir para sobre", "abrir about"],
+          "description": "Information about the app",
+          "utterances": ["go to about", "open about"],
           "params": {"id": "1"}
         }
     """
@@ -76,12 +77,12 @@ def RouterAgent(
 
     # ---------------- LLM module (optional) -----------------
     class RouteSelectionSig(dspy.Signature):
-        """Escolha a melhor rota para a mensagem.
+        """Choose the best route for the message.
 
-        Instruções:
-        - Retorne SOMENTE o path exato de uma das rotas fornecidas.
-        - Se nada for apropriado, retorne '/'.
-        - Considere name, description e utterances.
+        Instructions:
+        - Return ONLY the exact path of one of the provided routes.
+        - If nothing is appropriate, return None.
+        - Consider name, description, and utterances.
         """
 
         message: str = dspy.InputField()
@@ -156,12 +157,15 @@ def RouterAgent(
             params_to_use = None
 
         set_state({"last_message": message, "last_ver": ver, "requested_for": None})
-        if target_path:
+        if target_path is not None:
             current_base = current_full.split("?")[0]
             if current_base != target_path:
-                print("Navigating to", target_path)
+                print(f"Navigating to {target_path}")
                 navigate(target_path, params=params_to_use)
 
     hooks.use_effect(_effect_llm_nav, [llm_result, message, current_full])
+
+    if llm_loading:
+        return [Log(text="Router agent, verificando rota...")]
 
     return children or []
