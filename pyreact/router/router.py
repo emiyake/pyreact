@@ -180,7 +180,6 @@ def Router(*, initial=None, children):
                 "name": name,
                 "description": description,
                 "utterances": utterances,
-                # Expose as 'params' for consumers like RouterAgent
                 "params": default_params,
             }
         )

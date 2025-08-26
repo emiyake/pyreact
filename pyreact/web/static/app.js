@@ -5,7 +5,6 @@
   const chatContainer = document.getElementById('chat-container');
   const dbgTreeBtn = document.getElementById('dbg-tree');
   const dbgTraceBtn = document.getElementById('dbg-trace');
-  const dbgTraceEnable = document.getElementById('dbg-trace-enable');
 
   let ws;
   let retries = 0;
@@ -67,7 +66,6 @@
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        // Prefer channel-aware handling when present
         if (msg.channel === 'ui' && msg.type === 'html') {
           document.getElementById('root').innerHTML = msg.html;
           return;
@@ -90,7 +88,6 @@
           scrollToBottom(chatContainer || chronologicalOutput);
           return;
         }
-        // Backward compatibility: handle legacy payloads without channel
         if (msg.type === 'html') {
           document.getElementById('root').innerHTML = msg.html;
           return;
@@ -114,7 +111,6 @@
           return;
         }
       } catch {
-        // compatibility: legacy payload with raw HTML
         document.getElementById('root').innerHTML = ev.data;
       }
     };
@@ -167,22 +163,6 @@
       try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'trace'})); } catch {}
     });
   }
-  if (dbgTraceEnable) {
-    dbgTraceEnable.addEventListener('change', (e) => {
-      try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what: e.target.checked ? 'enable_trace':'disable_trace'})); } catch {}
-    });
-  }
-  document.addEventListener('keydown', (e) => {
-    const key = (e.key || '').toLowerCase();
-    if ((e.ctrlKey || e.metaKey) && key === 'v') {
-      e.preventDefault();
-      try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'tree'})); } catch {}
-    }
-    if ((e.ctrlKey || e.metaKey) && key === 't') {
-      e.preventDefault();
-      try { if (isOpen()) ws.send(JSON.stringify({t:'debug', what:'trace'})); } catch {}
-    }
-  });
 })();
 
 

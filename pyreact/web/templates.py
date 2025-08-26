@@ -129,10 +129,6 @@ BASE_HTML = """<!doctype html>
         class="px-3 py-1 border border-gray-300 rounded-[6px] bg-white cursor-pointer hover:bg-gray-100 transition-colors">
         Print Render Trace (Ctrl+T)
       </button>
-      <label
-        class="inline-flex items-center gap-2 text-[14px]">
-        <input type="checkbox" id="dbg-trace-enable" /> enable tracing
-      </label>
     </div>
     <div id="chat-container" class="mt-[60px] mx-4 mb-4 max-h-[80vh] overflow-auto">
       <div id="chronological-output" class="space-y-2"></div>

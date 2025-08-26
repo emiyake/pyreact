@@ -6,7 +6,6 @@ from typing import Optional, Set
 
 from fastapi import WebSocket
 
-from pyreact.core.hook import HookContext
 from pyreact.web.broadcast import InMemoryBroadcast
 
 
@@ -17,7 +16,6 @@ class ServerState:
     This removes the need for module-level globals and makes it easier to test.
     """
 
-    root_ctx: HookContext
     broadcast: InMemoryBroadcast = field(default_factory=InMemoryBroadcast)
     clients: Set[WebSocket] = field(default_factory=set)
     latest_html: Optional[str] = None

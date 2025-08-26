@@ -1,9 +1,10 @@
-from pyreact.boot.terminal import run_terminal
+from pyreact.boot import bootstrap, read_terminal_and_invoke
 from pyreact.core.core import component
 from components import Root
 import os
 import dotenv
 import dspy
+import asyncio
 
 
 @component
@@ -21,4 +22,5 @@ def Boot():
 
 
 if __name__ == "__main__":
-    run_terminal(Boot, prompt="> ", fps=20)
+    myapp = bootstrap(Boot, fps=20)
+    asyncio.run(read_terminal_and_invoke(myapp, prompt="> ", wait=True))

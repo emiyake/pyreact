@@ -12,7 +12,11 @@ class HookContext:
 
     @classmethod
     def get_service(cls, key, factory):
-        return cls._services.setdefault(key, factory())
+        service = cls._services.get(key)
+        if service is None:
+            service = factory()
+            cls._services[key] = service
+        return service
 
     def __init__(self, name, component_fn, *, props=None, key=None) -> None:
         self.name = name

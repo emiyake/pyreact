@@ -12,10 +12,6 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from pyreact.core.hook import HookContext
-from pyreact.core.runtime import schedule_rerender
-from pyreact.web.nav_service import NavService
-from pyreact.web.renderer import render_to_html
-from pyreact.input.bus import InputBus
 from pyreact.web.console import (
     ConsoleBuffer,
     enable_web_print,
@@ -24,8 +20,8 @@ from pyreact.web.console import (
 )
 from pyreact.web.ansi import ansi_to_html
 from pyreact.web.ws_endpoint import register_ws_routes
+from pyreact.boot.bootstrap import bootstrap
 from pyreact.web.state import ServerState
-from pyreact.web.render_loop import RenderLoop
 from pyreact.web.input_consumer import InputConsumer
 from pyreact.web.templates import BASE_HTML
 
@@ -38,9 +34,11 @@ CHAN_MSG = "message"
 CHAN_INPUT = "input"
 
 
-def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
+def create_fastapi_app(app_component_fn=None, *, app_runner=None):
     """Create the FastAPI app with lifecycle via ``lifespan``.
-    Returns ``(app, root_ctx)``.
+
+    When ``app_runner`` is provided, the server bridges HTML/nav updates from the
+    runner and forwards WebSocket inputs via runner.invoke/nav/print helpers.
     """
     app = FastAPI()
     # Serve static assets (JS/CSS) from the package's static directory
@@ -53,9 +51,10 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         # 0. Clean up any residual global state
         HookContext._services.clear()
 
-        # 1. Create application state (moved inside lifespan)
-        root_ctx = HookContext(app_component_fn.__name__, app_component_fn)
-        state = ServerState(root_ctx)
+        # 1. Create application state and runner
+        server_loop = asyncio.get_running_loop()
+        runner = app_runner or bootstrap(app_component_fn)
+        state = ServerState()
 
         # 2. Capture print() → ConsoleBuffer
         enable_web_print(echo_to_server_stdout=True)
@@ -68,18 +67,7 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
 
         console.subscribe(_on_console)
 
-        # 4. Programmatic navigation (navigate(...) → browser pushState)
-        navsvc = HookContext.get_service("nav_service", NavService)
-
-        async def _nav_push(path: str):
-            await publish_nav(path)
-
-        def _nav_listener(path: str):
-            asyncio.create_task(_nav_push(path))
-
-        navsvc.subs.append(_nav_listener)
-
-        # 5. Define helper functions that use state and root_ctx
+        # 4. Bridge HTML/nav updates from the runner
         async def publish_html(html_now: str) -> None:
             payload = json.dumps({"channel": "ui", "type": "html", "html": html_now})
             await state.broadcast.publish(CHAN_HTML, payload)
@@ -87,6 +75,17 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         async def publish_nav(path: str) -> None:
             payload = json.dumps({"channel": "ui", "type": "nav", "path": path})
             await state.broadcast.publish(CHAN_NAV, payload)
+
+        try:
+            runner.attach_web_bridge(
+                on_html=publish_html,
+                on_nav=publish_nav,
+                target_loop=server_loop,
+            )
+        except Exception:
+            pass
+
+        # 5. Define helper to broadcast stdout (ConsoleBuffer subscriber below)
 
         async def _broadcast_stdout(text: str) -> None:
             # Check if this is a special message format
@@ -153,88 +152,28 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                 pass
             await state.broadcast.publish(CHAN_STDOUT, payload)
 
-        # --------- debug helpers ---------
+        # --------- debug helpers (use runner) ---------
         def print_vnode_tree() -> None:
-            ctx = state.root_ctx
-            if ctx is None:
-                print("\x1b[90m[debug]\x1b[0m VNode tree not available yet.")
-                return
-
-            # Capture the VNode tree output as a single block
-            import io
-            import sys
-
-            # Capture stdout temporarily
-            old_stdout = sys.stdout
-            captured_output = io.StringIO()
-            sys.stdout = captured_output
-
             try:
-                print("\n\x1b[1m\x1b[36m=== VNode Tree ===\x1b[0m")
-                ctx.render_tree()
-                print("\x1b[1m\x1b[36m==================\x1b[0m\n")
-
-                # Get the captured output as a single string
-                vnode_output = captured_output.getvalue()
-
-                # Send as a single log entry
-                console = HookContext.get_service("console_buffer", ConsoleBuffer)
-                console.append(vnode_output)
-
-            finally:
-                # Restore stdout
-                sys.stdout = old_stdout
+                runner.print_vnode_tree()
+            except Exception:
+                print("\x1b[90m[debug]\x1b[0m VNode tree not available.")
 
         def print_render_trace() -> None:
             try:
-                from pyreact.core.debug import print_last_trace
-
-                # Capture the render trace output as a single block
-                import io
-                import sys
-
-                # Capture stdout temporarily
-                old_stdout = sys.stdout
-                captured_output = io.StringIO()
-                sys.stdout = captured_output
-
-                try:
-                    print_last_trace()
-
-                    # Get the captured output as a single string
-                    trace_output = captured_output.getvalue()
-
-                    # Send as a single log entry
-                    console = HookContext.get_service("console_buffer", ConsoleBuffer)
-                    console.append(trace_output)
-
-                finally:
-                    # Restore stdout
-                    sys.stdout = old_stdout
-
+                runner.print_render_trace()
             except Exception:
                 print("\x1b[90m[debug]\x1b[0m render trace not available.")
 
         async def _maybe_navigate(path: str) -> None:
             if path == "/favicon.ico":
                 return
+            try:
+                runner.nav(path)
+            except Exception:
+                pass
 
-            navsvc = HookContext.get_service("nav_service", NavService)
-            nav = navsvc.navigate
-            if callable(nav):
-                if navsvc.current != path:
-                    # Update RouterContext
-                    nav(path)
-                    # Schedule render; actual rendering happens in the render loop task
-                    schedule_rerender(root_ctx, reason=f"nav to {path}")
-                state.pending_path = None
-            else:
-                # Router has not mounted yet
-                navsvc.current = path
-                state.pending_path = path
-                schedule_rerender(root_ctx, reason=f"pending nav {path}")
-
-        render_loop = RenderLoop(state, publish_html, _maybe_navigate)
+        # No server-side RenderLoop; runner publishes HTML via bridge
 
         async def _handle_input_message(msg: dict) -> None:
             t = msg.get("t")
@@ -244,7 +183,6 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                 return
 
             if t in ("text", "submit"):
-                bus = HookContext.get_service("input_bus", InputBus)
                 value = msg.get("v", "")
 
                 if t == "submit" and value.strip():
@@ -264,15 +202,19 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                     )
                     await state.broadcast.publish(CHAN_MSG, user_payload)
 
-                bus.emit(
-                    {"type": t, "value": value, "source": "web", "ts": time.time()}
-                )
-                # Garantir que o loop de render acorde para processar o input
-                try:
-                    schedule_rerender(root_ctx, reason=f"input {t}")
-                except Exception:
-                    pass
-                return
+                    try:
+                        ret = runner.invoke(value, wait=True)
+                        if ret:
+                            try:
+                                # Print the returned lines to the console buffer so they appear in the UI
+                                console.append(
+                                    ret + ("\n" if not ret.endswith("\n") else "")
+                                )
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    return
 
             if t == "debug":
                 what = msg.get("what")
@@ -304,9 +246,7 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             handle_message=_handle_input_message,
         )
 
-        # 6. First render will be scheduled now that there's an event loop
-        schedule_rerender(root_ctx, reason="server startup")
-        render_task = asyncio.create_task(render_loop.run())
+        # 6. Start input consumer (runner loop handles rendering & publishing)
         input_task = asyncio.create_task(input_consumer.run())
 
         # 7. Define backlog provider function
@@ -346,8 +286,8 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
             return payloads
 
         # 8. Store state in app for access by routes
-        app.state.root_ctx = root_ctx
         app.state.server_state = state
+        app.state.app_runner = runner
 
         # 9. Register WebSocket routes
         register_ws_routes(
@@ -363,9 +303,7 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
         app.state._cleanup = {
             "console": console,
             "console_listener": _on_console,
-            "navsvc": navsvc,
-            "nav_listener": _nav_listener,
-            "render_task": render_task,
+            "render_task": None,
             "input_task": input_task,
         }
 
@@ -377,12 +315,14 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                 console.unsubscribe(_on_console)
             except Exception:
                 pass
+            # nav listener belongs to the runner; runner.shutdown() will clean it
             try:
-                navsvc.subs.remove(_nav_listener)
+                if app.state._cleanup.get("render_task") is not None:
+                    app.state._cleanup.get("render_task").cancel()
             except Exception:
                 pass
             try:
-                render_task.cancel()
+                runner.shutdown()
             except Exception:
                 pass
             try:
@@ -457,11 +397,11 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
 
         path = "/" + full_path
 
-        # Get state from app.state (set by lifespan)
-        root_ctx = getattr(request.app.state, "root_ctx", None)
+        # Get state and runner from app.state (set by lifespan)
         state = getattr(request.app.state, "server_state", None)
+        runner = getattr(request.app.state, "app_runner", None)
 
-        if root_ctx is None or state is None:
+        if runner is None or state is None:
             # Server not fully started yet
             return HTMLResponse(
                 BASE_HTML.replace("{SSR}", "<div>Loading...</div>").replace(
@@ -469,15 +409,17 @@ def create_fastapi_app(app_component_fn) -> tuple[FastAPI, HookContext]:
                 )
             )
 
-        # Schedule navigation and render immediately for SSR
-        # Note: _maybe_navigate is defined inside lifespan, so we need to handle navigation differently
-        navsvc = HookContext.get_service("nav_service", NavService)
-        if hasattr(navsvc, "navigate") and callable(navsvc.navigate):
-            navsvc.navigate(path)
-            schedule_rerender(root_ctx, reason=f"SSR nav to {path}")
+        # Navigate and render via runner
+        try:
+            runner.nav(path)
+        except Exception:
+            pass
 
-        # Render the current state for SSR
-        ssr_html = render_to_html(root_ctx)
+        ssr_html = ""
+        try:
+            ssr_html = runner.render_html()
+        except Exception:
+            ssr_html = ""
 
         # Don't include any stdout content in SSR - let WebSocket handle everything in chronological order
         stdout_ssr = ""
