@@ -51,18 +51,8 @@ def schedule_rerender(ctx, reason: str = None):
 
 async def run_renders() -> None:
     from pyreact.core.hook import HookContext  # import here to avoid infinite loop
+    from .debug import start_trace, end_trace
 
-    try:
-        from .debug import start_trace, end_trace
-    except Exception:
-
-        def start_trace(*_args, **_kw):  # type: ignore
-            return None
-
-        def end_trace():  # type: ignore
-            return None
-
-    # Drain the queue without awaiting on an initially-empty queue
     while True:
         try:
             ctx: HookContext = rerender_queue.get_nowait()

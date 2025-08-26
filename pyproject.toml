@@ -1,6 +1,7 @@
 [tool.poetry]
 authors = ["Edmar Miyake <edmar.miyake@gmail.com>"]
 description = ""
+include = [{ path = "pyreact/web/static/base.html", format = "wheel" }]
 name = "pyreact"
 readme = "README.md"
 version = "0.1.0"

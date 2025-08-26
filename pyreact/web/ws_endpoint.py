@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Callable, Iterable, Optional, Set
+from typing import Iterable, Optional, Set
 
 from fastapi import FastAPI, WebSocket
 from starlette.endpoints import WebSocketEndpoint
@@ -11,7 +11,6 @@ def register_ws_routes(
     app: FastAPI,
     *,
     broadcast,
-    backlog_provider: Callable[[], Iterable[str]],
     channels_to_forward: Iterable[str],
     input_channel: str,
     clients_set: Optional[Set[WebSocket]] = None,
@@ -34,14 +33,6 @@ def register_ws_routes(
             if clients_set is not None:
                 clients_set.add(ws)
 
-            # Send backlog first (pre-encoded JSON strings)
-            try:
-                for payload in backlog_provider():
-                    await ws.send_text(payload)
-            except Exception:
-                pass
-
-            # Start forwarders for configured channels
             self._forward_tasks = [
                 asyncio.create_task(self._forward(ws, channel))
                 for channel in channels_to_forward

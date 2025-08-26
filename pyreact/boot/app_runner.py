@@ -51,9 +51,7 @@ class AppRunner:
         self._console_cb = None
 
         # Web bridge callbacks (set by server): executed from runner thread
-        self._on_html: Optional[Callable[[str], None]] = None
         self._on_nav: Optional[Callable[[str], None]] = None
-        self._prev_html: Optional[str] = None
         self._nav_listener = None
 
         self._thread.start()
@@ -176,24 +174,16 @@ class AppRunner:
         except Exception:
             pass
 
-    def nav(self, dest: str) -> None:
+    def nav(self, dest: str, query: Optional[dict] = None, fragment: str = "") -> None:
         if self._stopping or not dest:
             return
 
-        async def _task():
-            try:
-                navsvc = self._root_ctx.get_service("nav_service", NavService)
-                go = getattr(navsvc, "navigate", None)
-                if callable(go):
-                    go(dest)
-                else:
-                    navsvc.current = dest
-                    if self._root_ctx is not None:
-                        schedule_rerender(self._root_ctx, reason=f"nav to {dest}")
-            except Exception:
-                pass
-
-        asyncio.run_coroutine_threadsafe(_task(), self._loop)
+        navsvc = self._root_ctx.get_service("nav_service", NavService)
+        go = getattr(navsvc, "navigate", None)
+        if callable(go):
+            asyncio.run_coroutine_threadsafe(
+                go(dest, query=query, fragment=fragment), self._loop
+            )
 
     def current_route(self) -> dict:
         if self._stopping:
@@ -219,7 +209,6 @@ class AppRunner:
     def attach_web_bridge(
         self,
         *,
-        on_html: Optional[Callable[[str], object]] = None,
         on_nav: Optional[Callable[[str], object]] = None,
         target_loop: Optional[asyncio.AbstractEventLoop] = None,
     ) -> None:
@@ -257,25 +246,7 @@ class AppRunner:
 
                 return _call
 
-        self._on_html = _wrap(on_html)
         self._on_nav = _wrap(on_nav)
-
-    def render_html(self) -> str:
-        """Return current HTML by rendering within the runner loop."""
-        if self._stopping or self._root_ctx is None:
-            return ""
-
-        async def _task():
-            # Wait for any pending renders to settle
-            await asyncio.sleep(0)
-            await get_render_idle().wait()
-            return render_to_html(self._root_ctx)
-
-        fut = asyncio.run_coroutine_threadsafe(_task(), self._loop)
-        try:
-            return fut.result(timeout=2.0)  # small timeout for SSR
-        except Exception:
-            return ""
 
     # -------------------------------
     # Internal: loop thread
@@ -349,25 +320,12 @@ class AppRunner:
         # Signal readiness to callers
         self._ready.set()
 
-        # Render loop
         interval = 1.0 / max(1, self._fps)
         try:
             while not self._stopping:
                 await run_renders()
-                try:
-                    if self._root_ctx is not None and self._on_html is not None:
-                        html_now = render_to_html(self._root_ctx)
-                        if html_now != self._prev_html:
-                            self._prev_html = html_now
-                            try:
-                                self._on_html(html_now)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
                 await asyncio.sleep(interval)
         finally:
-            # Graceful unmount
             try:
                 if self._root_ctx is not None:
                     self._root_ctx.unmount()

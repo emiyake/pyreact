@@ -55,7 +55,16 @@
 
     ws.onopen = () => {
       retries = 0;
-      try { ws.send(JSON.stringify({t:'hello', path: location.pathname})); } catch {}
+      try {
+        ws.send(
+          JSON.stringify({
+            t: 'hello',
+            path: location.pathname,
+            query: location.search || '',
+            fragment: location.hash || ''
+          })
+        );
+      } catch {}
       try { ws.send(JSON.stringify({t:'subscribe', channels:['ui','logs','chat']})); } catch {}
       clearInterval(heartbeat);
       heartbeat = setInterval(() => {
@@ -131,7 +140,17 @@
 
   // Back/forward → server
   window.addEventListener('popstate', () => {
-    try { if (isOpen()) ws.send(JSON.stringify({t:'nav', path: location.pathname})); } catch {}
+    try {
+      if (isOpen())
+        ws.send(
+          JSON.stringify({
+            t: 'nav',
+            path: location.pathname,
+            query: location.search || '',
+            fragment: location.hash || ''
+          })
+        );
+    } catch {}
   });
 
   // Input field (Keystroke → InputBus)

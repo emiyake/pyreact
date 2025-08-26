@@ -10,6 +10,7 @@ from fastapi import FastAPI, Response, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from urllib.parse import parse_qs
 
 from pyreact.core.hook import HookContext
 from pyreact.web.console import (
@@ -51,7 +52,7 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
         # 0. Clean up any residual global state
         HookContext._services.clear()
 
-        # 1. Create application state and runner
+        # Create application state and runner
         server_loop = asyncio.get_running_loop()
         runner = app_runner or bootstrap(app_component_fn)
         state = ServerState()
@@ -59,17 +60,11 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
         enable_web_print()
         console = HookContext.get_service("console_buffer", ConsoleBuffer)
 
-        # 3. Subscriber that pushes stdout to clients
+        # Subscriber that pushes stdout to clients
         def _on_console(text: str):
-            # we're inside the loop (startup), so scheduling is safe
             asyncio.create_task(_broadcast_stdout(text))
 
         console.subscribe(_on_console)
-
-        # 4. Bridge HTML/nav updates from the runner
-        async def publish_html(html_now: str) -> None:
-            payload = json.dumps({"channel": "ui", "type": "html", "html": html_now})
-            await state.broadcast.publish(CHAN_HTML, payload)
 
         async def publish_nav(path: str) -> None:
             payload = json.dumps({"channel": "ui", "type": "nav", "path": path})
@@ -77,14 +72,11 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
 
         try:
             runner.attach_web_bridge(
-                on_html=publish_html,
                 on_nav=publish_nav,
                 target_loop=server_loop,
             )
         except Exception:
             pass
-
-        # 5. Define helper to broadcast stdout (ConsoleBuffer subscriber below)
 
         async def _broadcast_stdout(text: str) -> None:
             # Check if this is a special message format
@@ -151,34 +143,35 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
                 pass
             await state.broadcast.publish(CHAN_STDOUT, payload)
 
-        # --------- debug helpers (use runner) ---------
-        def print_vnode_tree() -> None:
-            try:
-                runner.print_vnode_tree()
-            except Exception:
-                print("\x1b[90m[debug]\x1b[0m VNode tree not available.")
-
-        def print_render_trace() -> None:
-            try:
-                runner.print_render_trace()
-            except Exception:
-                print("\x1b[90m[debug]\x1b[0m render trace not available.")
-
-        async def _maybe_navigate(path: str) -> None:
-            if path == "/favicon.ico":
-                return
-            try:
-                runner.nav(path)
-            except Exception:
-                pass
-
-        # No server-side RenderLoop; runner publishes HTML via bridge
-
         async def _handle_input_message(msg: dict) -> None:
             t = msg.get("t")
 
             if t in ("hello", "nav"):
-                await _maybe_navigate(msg.get("path", "/"))
+                path = msg.get("path", "/")
+                raw_query = msg.get("query", "") or ""
+                raw_fragment = msg.get("fragment", "") or ""
+
+                # Normalize string forms that may include leading '?' or '#'
+                if isinstance(raw_query, str):
+                    q = raw_query[1:] if raw_query.startswith("?") else raw_query
+                    parsed_q = parse_qs(q)
+                    # Flatten values: keep only the first value per key
+                    query = {
+                        k: (v[0] if isinstance(v, list) and v else "")
+                        for k, v in parsed_q.items()
+                    }
+                elif isinstance(raw_query, dict):
+                    query = {str(k): str(v) for k, v in raw_query.items()}
+                else:
+                    query = {}
+
+                fragment = (
+                    raw_fragment[1:]
+                    if isinstance(raw_fragment, str) and raw_fragment.startswith("#")
+                    else str(raw_fragment or "")
+                )
+
+                runner.nav(path, query=query, fragment=fragment)
                 return
 
             if t in ("text", "submit"):
@@ -200,27 +193,15 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
                         }
                     )
                     await state.broadcast.publish(CHAN_MSG, user_payload)
-
-                    try:
-                        ret = runner.invoke(value, wait=True)
-                        if ret:
-                            try:
-                                # Print the returned lines to the console buffer so they appear in the UI
-                                console.append(
-                                    ret + ("\n" if not ret.endswith("\n") else "")
-                                )
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                    runner.invoke(value, wait=True)
                     return
 
             if t == "debug":
                 what = msg.get("what")
                 if what == "tree":
-                    print_vnode_tree()
+                    runner.print_vnode_tree()
                 elif what == "trace":
-                    print_render_trace()
+                    runner.print_render_trace()
 
         input_consumer = InputConsumer(
             broadcast=state.broadcast,
@@ -228,60 +209,22 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
             handle_message=_handle_input_message,
         )
 
-        # 6. Start input consumer (runner loop handles rendering & publishing)
         input_task = asyncio.create_task(input_consumer.run())
 
-        # 7. Define backlog provider function
-        def _backlog_payloads() -> list[str]:
-            payloads: list[str] = []
-            try:
-                console = HookContext.get_service("console_buffer", ConsoleBuffer)
-                stdout_lines = console.dump().split("\n")
-                for line in stdout_lines:
-                    if line.startswith("__MESSAGE__:"):
-                        try:
-                            message_json = line[12:]
-                            message_data = json.loads(message_json)
-                            payloads.append(
-                                json.dumps(
-                                    {
-                                        "channel": "chat",
-                                        "type": "message",
-                                        "data": message_data,
-                                    }
-                                )
-                            )
-                        except json.JSONDecodeError:
-                            pass
-                    elif line.strip():
-                        payloads.append(
-                            json.dumps(
-                                {
-                                    "channel": "logs",
-                                    "type": "stdout",
-                                    "html": ansi_to_html(line + "\n"),
-                                }
-                            )
-                        )
-            except Exception:
-                pass
-            return payloads
-
-        # 8. Store state in app for access by routes
+        # Store state in app for access by routes
         app.state.server_state = state
         app.state.app_runner = runner
 
-        # 9. Register WebSocket routes
+        # Register WebSocket routes
         register_ws_routes(
             app,
             broadcast=state.broadcast,
-            backlog_provider=_backlog_payloads,
             channels_to_forward=[CHAN_HTML, CHAN_NAV, CHAN_STDOUT, CHAN_MSG],
             input_channel=CHAN_INPUT,
             clients_set=state.clients,
         )
 
-        # 9. Initial SSR will already use stdout accumulated so far
+        # Initial SSR will already use stdout accumulated so far
         app.state._cleanup = {
             "console": console,
             "console_listener": _on_console,
@@ -292,32 +235,15 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
         try:
             yield
         finally:
-            # shutdown
-            try:
-                console.unsubscribe(_on_console)
-            except Exception:
-                pass
-            # nav listener belongs to the runner; runner.shutdown() will clean it
-            try:
-                if app.state._cleanup.get("render_task") is not None:
-                    app.state._cleanup.get("render_task").cancel()
-            except Exception:
-                pass
-            try:
-                runner.shutdown()
-            except Exception:
-                pass
-            try:
-                input_task.cancel()
-            except Exception:
-                pass
-            disable_web_print()
+            console.unsubscribe(_on_console)
 
-            # Clean up global state
-            try:
-                HookContext._services.clear()
-            except Exception:
-                pass
+            if app.state._cleanup.get("render_task") is not None:
+                app.state._cleanup.get("render_task").cancel()
+
+            runner.shutdown()
+            input_task.cancel()
+            HookContext._services.clear()
+            disable_web_print()
 
     app.router.lifespan_context = lifespan
 
@@ -347,40 +273,7 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
                 ]
             )
         ):
-            # Avoid SSR for accidental assets (like the favicon)
             return Response(status_code=204)
-
-        path = "/" + full_path
-
-        # Get state and runner from app.state (set by lifespan)
-        state = getattr(request.app.state, "server_state", None)
-        runner = getattr(request.app.state, "app_runner", None)
-
-        if runner is None or state is None:
-            # Server not fully started yet
-            return HTMLResponse(
-                BASE_HTML.replace("{SSR}", "<div>Loading...</div>").replace(
-                    "{STDOUT}", ""
-                )
-            )
-
-        # Navigate and render via runner
-        try:
-            runner.nav(path)
-        except Exception:
-            pass
-
-        ssr_html = ""
-        try:
-            ssr_html = runner.render_html()
-        except Exception:
-            ssr_html = ""
-
-        # Don't include any stdout content in SSR - let WebSocket handle everything in chronological order
-        stdout_ssr = ""
-
-        return HTMLResponse(
-            BASE_HTML.replace("{SSR}", ssr_html).replace("{STDOUT}", stdout_ssr)
-        )
+        return HTMLResponse(BASE_HTML)
 
     return app, None

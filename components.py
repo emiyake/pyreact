@@ -188,7 +188,6 @@ def QAHome():
             sender="assistant",
             message_type="info",
         ),
-        Log(key="hint", text="Digite sua pergunta e pressione Enter…"),
         Keystroke(key="qa_input", on_submit=on_enter),
         GuardRail(
             key="guardrail",
@@ -247,6 +246,10 @@ def Home():
             text="Press 'a' for about, 'q' for qa, 'd' for dict navigation",
             trigger="mount",
         ),
+        Log(
+            key="catalog",
+            text=f"Rotas disponíveis: {[r.get('name') or r['path'] for r in (catalog or [])]}",
+        ),
         Keystroke(key="nav", on_submit=handle_navigate_with_params),
         Message(
             key="instruction",
@@ -256,10 +259,6 @@ def Home():
             trigger="mount",
         ),
         ProjectRouterAgent(key="agent-router", message=user_query),
-        Log(
-            key="catalog",
-            text=f"Rotas disponíveis: {[r.get('name') or r['path'] for r in (catalog or [])]}",
-        ),
     ]
 
 

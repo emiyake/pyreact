@@ -108,30 +108,17 @@ class _WebStream:
 
     def write(self, s: str) -> int:
         if self._original is not None:
-            try:
-                self._original.write(s)
-            except Exception:
-                # Ignore errors from the original stream to avoid breaking capture
-                pass
-            try:
-                self._original.flush()
-            except Exception:
-                pass
+            self._original.write(s)
+            self._original.flush()
 
-        # Always send to the web buffer
-        try:
+        if self._console is not None:
             self._console.append(s)
-        except Exception:
-            # Never let the application crash due to buffer errors
-            pass
+
         return len(s)
 
     def flush(self) -> None:
         if self._original is not None:
-            try:
-                self._original.flush()
-            except Exception:
-                pass
+            self._original.flush()
 
 
 def enable_web_print() -> None:
