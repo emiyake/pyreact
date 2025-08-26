@@ -56,8 +56,7 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
         runner = app_runner or bootstrap(app_component_fn)
         state = ServerState()
 
-        # 2. Capture print() → ConsoleBuffer
-        enable_web_print(echo_to_server_stdout=True)
+        enable_web_print()
         console = HookContext.get_service("console_buffer", ConsoleBuffer)
 
         # 3. Subscriber that pushes stdout to clients
@@ -222,23 +221,6 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
                     print_vnode_tree()
                 elif what == "trace":
                     print_render_trace()
-                elif what == "enable_trace":
-                    try:
-                        from pyreact.core.debug import enable_tracing, clear_traces
-
-                        clear_traces()
-                        enable_tracing()
-                        print("\x1b[90m[debug]\x1b[0m tracing enabled.")
-                    except Exception:
-                        print("\x1b[90m[debug]\x1b[0m could not enable tracing.")
-                elif what == "disable_trace":
-                    try:
-                        from pyreact.core.debug import disable_tracing
-
-                        disable_tracing()
-                        print("\x1b[90m[debug]\x1b[0m tracing disabled.")
-                    except Exception:
-                        print("\x1b[90m[debug]\x1b[0m could not disable tracing.")
 
         input_consumer = InputConsumer(
             broadcast=state.broadcast,
@@ -339,36 +321,6 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
 
     app.router.lifespan_context = lifespan
 
-    def print_render_trace() -> None:
-        try:
-            from pyreact.core.debug import print_last_trace
-
-            # Capture the render trace output as a single block
-            import io
-            import sys
-
-            # Capture stdout temporarily
-            old_stdout = sys.stdout
-            captured_output = io.StringIO()
-            sys.stdout = captured_output
-
-            try:
-                print_last_trace()
-
-                # Get the captured output as a single string
-                trace_output = captured_output.getvalue()
-
-                # Send as a single log entry
-                console = HookContext.get_service("console_buffer", ConsoleBuffer)
-                console.append(trace_output)
-
-            finally:
-                # Restore stdout
-                sys.stdout = old_stdout
-
-        except Exception:
-            print("\x1b[90m[debug]\x1b[0m render trace not available.")
-
     # ---------- routes ----------
     @app.get("/favicon.ico")
     async def favicon():
@@ -376,6 +328,9 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
 
     @app.get("/{full_path:path}")
     async def index(request: Request, full_path: str = ""):
+        console = HookContext.get_service("console_buffer", ConsoleBuffer)
+        console.clear()
+
         accept = request.headers.get("accept", "")
 
         # Only skip SSR for specific asset types, not for missing Accept header
@@ -427,24 +382,5 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
         return HTMLResponse(
             BASE_HTML.replace("{SSR}", ssr_html).replace("{STDOUT}", stdout_ssr)
         )
-
-    @app.post("/_test/input")
-    async def test_input(request: Request):
-        try:
-            data = await request.json()
-        except Exception:
-            # fallback to query params
-            qp = dict(request.query_params)
-            data = {"t": qp.get("t"), "v": qp.get("v", "")}
-        t = data.get("t") or data.get("type")
-        v = data.get("v") or data.get("value", "")
-        if not t:
-            return Response(status_code=400, content="missing 't'")
-        payload = json.dumps({"t": t, "v": v})
-        state = getattr(request.app.state, "server_state", None)
-        if state is None:
-            return Response(status_code=503, content="server not ready")
-        await state.broadcast.publish(CHAN_INPUT, payload)
-        return Response(status_code=204)
 
     return app, None
