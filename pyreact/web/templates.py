@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Base HTML template used for SSR. Prefer loading from static/base.html,
-# fallback to sibling base.html, then to the inline template in dev.
 try:
     BASE_HTML = (Path(__file__).with_name("static") / "base.html").read_text(
         encoding="utf-8"

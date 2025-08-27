@@ -11,31 +11,27 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from urllib.parse import parse_qs
-
 from pyreact.core.hook import HookContext
-from pyreact.web.console import (
+from .console import (
     ConsoleBuffer,
     enable_web_print,
     disable_web_print,
-    _original_stdout,
 )
-from pyreact.web.ansi import ansi_to_html
-from pyreact.web.ws_endpoint import register_ws_routes
-from pyreact.boot.bootstrap import bootstrap
-from pyreact.web.state import ServerState
-from pyreact.web.input_consumer import InputConsumer
-from pyreact.web.templates import BASE_HTML
+from .ansi import ansi_to_html
+from .ws_endpoint import (
+    register_ws_routes,
+    CHAN_HTML,
+    CHAN_NAV,
+    CHAN_STDOUT,
+    CHAN_MSG,
+    CHAN_INPUT,
+)
+from .state import ServerState
+from .input_consumer import InputConsumer
+from .templates import BASE_HTML
 
 
-# Channel names
-CHAN_HTML = "html"
-CHAN_NAV = "nav"
-CHAN_STDOUT = "stdout"
-CHAN_MSG = "message"
-CHAN_INPUT = "input"
-
-
-def create_fastapi_app(app_component_fn=None, *, app_runner=None):
+def create_fastapi_app(runner):
     """Create the FastAPI app with lifecycle via ``lifespan``.
 
     When ``app_runner`` is provided, the server bridges HTML/nav updates from the
@@ -49,18 +45,12 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
     # ---------- lifespan (startup/shutdown) ----------
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # 0. Clean up any residual global state
-        HookContext._services.clear()
-
-        # Create application state and runner
         server_loop = asyncio.get_running_loop()
-        runner = app_runner or bootstrap(app_component_fn)
         state = ServerState()
 
         enable_web_print()
         console = HookContext.get_service("console_buffer", ConsoleBuffer)
 
-        # Subscriber that pushes stdout to clients
         def _on_console(text: str):
             asyncio.create_task(_broadcast_stdout(text))
 
@@ -79,69 +69,20 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
             pass
 
         async def _broadcast_stdout(text: str) -> None:
-            # Check if this is a special message format
             if text.startswith("__MESSAGE__:"):
-                # Extract the JSON message data
-                try:
-                    message_json = text[12:]  # Remove "__MESSAGE__:" prefix
-                    message_data = json.loads(message_json)
+                message_json = text[12:]  # Remove "__MESSAGE__:"
+                message_data = json.loads(message_json)
 
-                    # Format for terminal output
-                    sender_colors = {
-                        "user": "\x1b[34m",  # Azul
-                        "system": "\x1b[90m",  # Cinza
-                        "assistant": "\x1b[32m",  # Verde
-                    }
-                    type_colors = {
-                        "chat": "",
-                        "info": "\x1b[36m",  # Ciano
-                        "warning": "\x1b[33m",  # Amarelo
-                        "error": "\x1b[31m",  # Vermelho
-                    }
-
-                    sender = message_data.get("sender", "user")
-                    message_type = message_data.get("message_type", "chat")
-                    message_text = message_data.get("text", "")
-
-                    color = sender_colors.get(sender, "") + type_colors.get(
-                        message_type, ""
-                    )
-                    reset = "\x1b[0m"
-
-                    # Print to terminal (original stdout)
-                    formatted_text = (
-                        f"{color}[{sender.upper()}] {message_text}{reset}\n"
-                    )
-                    if _original_stdout:
-                        _original_stdout.write(formatted_text)
-                        _original_stdout.flush()
-
-                    # Send as a special message type to web clients (chat channel)
-                    payload = json.dumps(
-                        {"channel": "chat", "type": "message", "data": message_data}
-                    )
-
-                except json.JSONDecodeError:
-                    # Fallback to regular stdout if JSON parsing fails
-                    payload = json.dumps(
-                        {
-                            "channel": "logs",
-                            "type": "stdout",
-                            "html": ansi_to_html(text),
-                        }
-                    )
-            else:
-                # Convert ANSI to HTML for colored output in browser
-                payload = json.dumps(
-                    {"channel": "logs", "type": "stdout", "html": ansi_to_html(text)}
+                await state.broadcast.publish(
+                    CHAN_MSG,
+                    {"channel": "chat", "type": "message", "data": message_data},
                 )
-            try:
-                if text.startswith("__MESSAGE__:"):
-                    await state.broadcast.publish(CHAN_MSG, payload)
-                    return
-            except Exception:
-                pass
-            await state.broadcast.publish(CHAN_STDOUT, payload)
+                return
+
+            await state.broadcast.publish(
+                CHAN_STDOUT,
+                {"channel": "logs", "type": "stdout", "html": ansi_to_html(text)},
+            )
 
         async def _handle_input_message(msg: dict) -> None:
             t = msg.get("t")
@@ -176,23 +117,21 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
 
             if t in ("text", "submit"):
                 value = msg.get("v", "")
-
                 if t == "submit" and value.strip():
-                    user_message_data = {
-                        "type": "message",
-                        "text": value,
-                        "sender": "user",
-                        "message_type": "chat",
-                        "timestamp": time.time(),
-                    }
-                    user_payload = json.dumps(
+                    await state.broadcast.publish(
+                        CHAN_MSG,
                         {
                             "channel": "chat",
                             "type": "message",
-                            "data": user_message_data,
-                        }
+                            "data": {
+                                "type": "message",
+                                "text": value,
+                                "sender": "user",
+                                "message_type": "chat",
+                                "timestamp": time.time(),
+                            },
+                        },
                     )
-                    await state.broadcast.publish(CHAN_MSG, user_payload)
                     runner.invoke(value, wait=True)
                     return
 
@@ -221,7 +160,6 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
             broadcast=state.broadcast,
             channels_to_forward=[CHAN_HTML, CHAN_NAV, CHAN_STDOUT, CHAN_MSG],
             input_channel=CHAN_INPUT,
-            clients_set=state.clients,
         )
 
         # Initial SSR will already use stdout accumulated so far
@@ -247,33 +185,12 @@ def create_fastapi_app(app_component_fn=None, *, app_runner=None):
 
     app.router.lifespan_context = lifespan
 
-    # ---------- routes ----------
     @app.get("/favicon.ico")
     async def favicon():
         return Response(status_code=204, media_type="image/x-icon")
 
     @app.get("/{full_path:path}")
-    async def index(request: Request, full_path: str = ""):
-        console = HookContext.get_service("console_buffer", ConsoleBuffer)
-        console.clear()
-
-        accept = request.headers.get("accept", "")
-
-        # Only skip SSR for specific asset types, not for missing Accept header
-        if (
-            accept
-            and "text/html" not in accept.lower()
-            and any(
-                asset_type in accept.lower()
-                for asset_type in [
-                    "image/",
-                    "text/css",
-                    "application/javascript",
-                    "font/",
-                ]
-            )
-        ):
-            return Response(status_code=204)
+    async def index(_request: Request):
         return HTMLResponse(BASE_HTML)
 
     return app, None

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from collections import defaultdict
+import json
 from typing import AsyncIterator, Dict, Set
 
 
@@ -28,10 +29,10 @@ class InMemoryBroadcast:
         self._channels: Dict[str, Set[asyncio.Queue[BroadcastEvent]]] = defaultdict(set)
         self._lock = asyncio.Lock()
 
-    async def publish(self, channel: str, message: str) -> None:
+    async def publish(self, channel: str, message: dict) -> None:
         async with self._lock:
             queues = list(self._channels.get(channel, set()))
-        event = BroadcastEvent(message)
+        event = BroadcastEvent(json.dumps(message))
         for q in queues:
             try:
                 q.put_nowait(event)

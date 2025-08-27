@@ -23,7 +23,6 @@ class NavService:
         parsed = urlparse(self.current)
         query_params = {}
 
-        # Parse query string into a flat dict (taking first value for each key)
         for key, values in parse_qs(parsed.query).items():
             query_params[key] = values[0] if values else ""
 

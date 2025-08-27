@@ -121,7 +121,6 @@ def _css_from_state(state: Dict[str, object]) -> str:
 
 def ansi_to_html(s: str) -> str:
     """Convert ANSI-colored text to escaped HTML with <span> styles.
-
     Keeps newlines; safe to inject as innerHTML.
     """
     out: list[str] = []

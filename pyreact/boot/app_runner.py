@@ -7,10 +7,7 @@ from typing import Optional, Callable
 from pyreact.core.hook import HookContext
 from pyreact.core.runtime import run_renders, schedule_rerender, get_render_idle
 from pyreact.input.bus import InputBus
-from pyreact.web.console import ConsoleBuffer
 from pyreact.web.nav_service import NavService
-from pyreact.web.renderer import render_to_html
-import json
 
 
 def _emit_text_and_submit(bus: InputBus, text: str) -> None:
@@ -43,12 +40,7 @@ class AppRunner:
         # Set on loop thread during startup
         self._root_ctx: Optional[HookContext] = None
 
-        # Message capture (from ConsoleBuffer "__MESSAGE__:" lines)
-        self._msg_lock: threading.Lock = threading.Lock()
-        self._messages: list[str] = []
-
-        # Console subscription callback (set on loop thread)
-        self._console_cb = None
+        # Removed message buffering and console subscription
 
         # Web bridge callbacks (set by server): executed from runner thread
         self._on_nav: Optional[Callable[[str], None]] = None
@@ -63,18 +55,13 @@ class AppRunner:
     # -------------------------------
     def invoke(
         self, text: str, *, wait: bool = False, timeout: Optional[float] = None
-    ) -> str:
+    ) -> None:
         """Send a line of input to the app via the InputBus.
 
         If wait=True, blocks until the current render batch becomes idle or until timeout.
-        Returns formatted message lines (joined by newlines) captured during this invoke.
         """
         if self._stopping or self._bus is None:
-            return ""
-
-        # Snapshot the current message count to compute delta later
-        with self._msg_lock:
-            start_idx = len(self._messages)
+            return
 
         async def _do_emit_and_maybe_wait(txt: str, should_wait: bool):
             _emit_text_and_submit(self._bus, txt)
@@ -90,11 +77,7 @@ class AppRunner:
             try:
                 fut.result(timeout=timeout)
             except Exception:
-                return ""
-        # Collect delta messages and return as a single string
-        with self._msg_lock:
-            lines = self._messages[start_idx:]
-        return "\n".join(lines)
+                return
 
     def shutdown(self) -> None:
         """Stop render loop and background threads."""
@@ -102,13 +85,7 @@ class AppRunner:
             return
         self._stopping = True
 
-        # Unsubscribe console buffer (best-effort)
-        try:
-            if self._console_cb is not None:
-                ConsoleBuffer().unsubscribe(self._console_cb)
-                self._console_cb = None
-        except Exception:
-            pass
+        # No console buffer to unsubscribe
         # Remove nav listener
         try:
             if self._nav_listener is not None:
@@ -181,9 +158,22 @@ class AppRunner:
         navsvc = self._root_ctx.get_service("nav_service", NavService)
         go = getattr(navsvc, "navigate", None)
         if callable(go):
-            asyncio.run_coroutine_threadsafe(
-                go(dest, query=query, fragment=fragment), self._loop
-            )
+            if inspect.iscoroutinefunction(go):
+                asyncio.run_coroutine_threadsafe(
+                    go(dest, query=query, fragment=fragment), self._loop
+                )
+            else:
+
+                def _call():
+                    try:
+                        go(dest, query=query, fragment=fragment)
+                    except Exception:
+                        pass
+
+                try:
+                    self._loop.call_soon_threadsafe(_call)
+                except Exception:
+                    pass
 
     def current_route(self) -> dict:
         if self._stopping:
@@ -289,33 +279,7 @@ class AppRunner:
         except Exception:
             pass
 
-        # Subscribe to ConsoleBuffer for structured Message events
-        console = ConsoleBuffer()
-
-        def _on_console_append(chunk: str) -> None:
-            try:
-                # Fast path: check marker existence first
-                if "__MESSAGE__:" not in chunk:
-                    return
-                for line in chunk.splitlines():
-                    if not line.startswith("__MESSAGE__:"):
-                        continue
-                    payload = line[len("__MESSAGE__:") :]
-                    try:
-                        data = json.loads(payload)
-                    except Exception:
-                        continue
-                    sender = str(data.get("sender", "").upper() or "MESSAGE")
-                    text = str(data.get("text", ""))
-                    formatted = f"[{sender}] {text}"
-                    with self._msg_lock:
-                        self._messages.append(formatted)
-            except Exception:
-                # Never break the app due to console parsing
-                pass
-
-        console.subscribe(_on_console_append)
-        self._console_cb = _on_console_append
+        # Removed ConsoleBuffer subscription
 
         # Signal readiness to callers
         self._ready.set()

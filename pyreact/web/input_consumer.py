@@ -34,5 +34,4 @@ class InputConsumer:
                 try:
                     await self._handle_message(msg)
                 except Exception:
-                    # Never break the consumer due to handler exceptions
                     pass

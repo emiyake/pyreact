@@ -77,9 +77,7 @@ async def read_terminal_and_invoke(
             if s in (":q", ":quit", ":exit"):
                 break
             try:
-                ret = app.invoke(txt, wait=wait)
-                if ret:
-                    print("rest", ret)
+                app.invoke(txt, wait=wait)
             except Exception:
                 # Keep the loop resilient to user code errors
                 pass

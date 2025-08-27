@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Iterable, Optional, Set
 
 from fastapi import FastAPI, WebSocket
 from starlette.endpoints import WebSocketEndpoint
+from .broadcast import InMemoryBroadcast
+
+
+# Channel names
+CHAN_HTML = "html"
+CHAN_NAV = "nav"
+CHAN_STDOUT = "stdout"
+CHAN_MSG = "message"
+CHAN_INPUT = "input"
 
 
 def register_ws_routes(
     app: FastAPI,
     *,
-    broadcast,
+    broadcast: InMemoryBroadcast,
     channels_to_forward: Iterable[str],
     input_channel: str,
-    clients_set: Optional[Set[WebSocket]] = None,
 ) -> None:
     """
     Register a WebSocket route that bridges pub/sub channels to the socket.
@@ -30,8 +39,6 @@ def register_ws_routes(
 
         async def on_connect(self, ws: WebSocket):
             await ws.accept()
-            if clients_set is not None:
-                clients_set.add(ws)
 
             self._forward_tasks = [
                 asyncio.create_task(self._forward(ws, channel))
@@ -40,16 +47,11 @@ def register_ws_routes(
 
         async def on_receive(self, ws: WebSocket, data: str):
             try:
-                await broadcast.publish(input_channel, data)
+                await broadcast.publish(input_channel, json.loads(data))
             except Exception:
                 pass
 
         async def on_disconnect(self, ws: WebSocket, close_code: int):
-            if clients_set is not None:
-                try:
-                    clients_set.discard(ws)
-                except Exception:
-                    pass
             for t in getattr(self, "_forward_tasks", []):
                 try:
                     t.cancel()
