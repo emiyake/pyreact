@@ -116,9 +116,9 @@
       }
     </style>
   </head>
-  <body class="m-0 p-0 font-sans">
+  <body class="m-0 p-0 font-sans grid grid-rows-[auto_1fr_auto] h-screen">
     <div id="dbg"
-      class="fixed top-0 left-0 right-0 flex gap-2 items-center py-2 px-3 bg-[#f7f7f8] border-b border-[#e5e7eb] z-10">
+      class="sticky top-0 flex gap-2 items-center py-2 px-3 bg-[#f7f7f8] border-b border-[#e5e7eb] z-10">
       <button id="dbg-tree"
         class="px-3 py-1 border border-gray-300 rounded-[6px] bg-white cursor-pointer hover:bg-gray-100 transition-colors">
         Print VNode Tree (Ctrl+V)
@@ -128,11 +128,11 @@
         Print Render Trace (Ctrl+T)
       </button>
     </div>
-    <div id="chat-container" class="mt-[60px] mx-4 mb-4 max-h-[80vh] overflow-auto">
+    <div id="chat-container" class="py-2 px-4 overflow-auto">
       <div id="chronological-output" class="space-y-2"></div>
     </div>
     <input id="cli"
-      class="fixed bottom-0 left-0 right-0 py-2 px-4 border-0 border-t border-gray-300 text-[16px] outline-none"
+      class="py-2 px-4 border-0 border-t border-gray-300 text-[16px] outline-none"
       placeholder="type and press Enter…" autofocus />
     <script src="/static/app.js"></script>
   </body>

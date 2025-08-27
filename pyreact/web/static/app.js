@@ -127,10 +127,6 @@
     } catch {}
   });
 
-  // Input field (Keystroke → InputBus)
-  cli.addEventListener('input', (e) => {
-    try { if (isOpen()) ws.send(JSON.stringify({t:'text', v: e.target.value})); } catch {}
-  });
   cli.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       const userInput = cli.value.trim();
@@ -139,7 +135,6 @@
         try { if (isOpen()) ws.send(JSON.stringify({t:'submit', v: userInput})); } catch {}
       }
       cli.value = '';
-      // keep focus and auto-scroll
       cli.focus();
       scrollToBottom(chatContainer || chronologicalOutput);
     }
