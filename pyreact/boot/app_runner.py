@@ -7,7 +7,8 @@ from typing import Optional, Callable
 from pyreact.core.hook import HookContext
 from pyreact.core.runtime import run_renders, schedule_rerender, get_render_idle
 from pyreact.input.bus import InputBus
-from pyreact.web.nav_service import NavService
+from pyreact.router.nav_service import NavService
+from pyreact.web.console import ConsoleBuffer, enable_web_print, disable_web_print
 
 
 def _emit_text_and_submit(bus: InputBus, text: str) -> None:
@@ -26,10 +27,9 @@ class AppRunner:
         app.shutdown()
     """
 
-    def __init__(self, app_component_fn, *, fps: int = 20, trace: bool = True):
+    def __init__(self, app_component_fn, *, fps: int = 20):
         self._app_component_fn = app_component_fn
         self._fps: int = max(1, int(fps))
-        self._trace: bool = bool(trace)
         self._loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
         self._thread: threading.Thread = threading.Thread(
             target=self._thread_main, name="pyreact-app-loop", daemon=True
@@ -37,22 +37,18 @@ class AppRunner:
         self._stopping: bool = False
         self._ready: threading.Event = threading.Event()
 
-        # Set on loop thread during startup
         self._root_ctx: Optional[HookContext] = None
-
-        # Removed message buffering and console subscription
 
         # Web bridge callbacks (set by server): executed from runner thread
         self._on_nav: Optional[Callable[[str], None]] = None
         self._nav_listener = None
+        self._on_console: Optional[Callable[[str], None]] = None
+        self._console_listener = None
+        self._did_enable_web_print: bool = False
 
         self._thread.start()
-        # Wait until the loop thread initialized the app
         self._ready.wait()
 
-    # -------------------------------
-    # Public API
-    # -------------------------------
     def invoke(
         self, text: str, *, wait: bool = False, timeout: Optional[float] = None
     ) -> None:
@@ -85,7 +81,20 @@ class AppRunner:
             return
         self._stopping = True
 
-        # No console buffer to unsubscribe
+        # Remove console buffer listener
+        try:
+            if self._console_listener is not None:
+                console = HookContext.get_service("console_buffer", ConsoleBuffer)
+                try:
+                    console.unsubscribe(self._console_listener)
+                except Exception:
+                    pass
+                self._console_listener = None
+        except Exception:
+            pass
+
+        disable_web_print()
+
         # Remove nav listener
         try:
             if self._nav_listener is not None:
@@ -117,15 +126,7 @@ class AppRunner:
             return
 
         async def _task():
-            try:
-                BOLD = "\x1b[1m"
-                CYAN = "\x1b[36m"
-                RESET = "\x1b[0m"
-                print(f"\n{BOLD}{CYAN}=== VNode Tree ==={RESET}")
-                self._root_ctx.render_tree()
-                print(f"{BOLD}{CYAN}=================={RESET}\n")
-            except Exception:
-                print("\x1b[90m[debug]\x1b[0m VNode tree not available.")
+            self._root_ctx.render_tree()
 
         fut = asyncio.run_coroutine_threadsafe(_task(), self._loop)
         try:
@@ -200,10 +201,10 @@ class AppRunner:
         self,
         *,
         on_nav: Optional[Callable[[str], object]] = None,
+        on_console: Optional[Callable[[str], object]] = None,
         target_loop: Optional[asyncio.AbstractEventLoop] = None,
     ) -> None:
         """Attach callbacks for HTML and navigation updates.
-
         If ``target_loop`` is provided, callbacks are marshaled to that loop:
         - coroutine callbacks → scheduled with asyncio.run_coroutine_threadsafe
         - regular callbacks → scheduled with loop.call_soon_threadsafe
@@ -237,6 +238,10 @@ class AppRunner:
                 return _call
 
         self._on_nav = _wrap(on_nav)
+        self._on_console = _wrap(on_console)
+
+        if self._on_console is not None:
+            enable_web_print()
 
     # -------------------------------
     # Internal: loop thread
@@ -246,15 +251,10 @@ class AppRunner:
         self._loop.run_until_complete(self._loop_main())
 
     async def _loop_main(self) -> None:
-        # Optionally enable tracing by default
-        if self._trace:
-            try:
-                from pyreact.core.debug import enable_tracing, clear_traces
+        from pyreact.core.debug import enable_tracing, clear_traces
 
-                clear_traces()
-                enable_tracing()
-            except Exception:
-                pass
+        clear_traces()
+        enable_tracing()
 
         # Initialize root context and services within the loop thread
         self._root_ctx = HookContext(
@@ -279,9 +279,22 @@ class AppRunner:
         except Exception:
             pass
 
-        # Removed ConsoleBuffer subscription
+        # Bridge console buffer appends to server publisher
+        try:
+            console = HookContext.get_service("console_buffer", ConsoleBuffer)
 
-        # Signal readiness to callers
+            def _console_listener(text: str) -> None:
+                try:
+                    if self._on_console is not None:
+                        self._on_console(text)
+                except Exception:
+                    pass
+
+            console.subscribe(_console_listener)
+            self._console_listener = _console_listener
+        except Exception:
+            pass
+
         self._ready.set()
 
         interval = 1.0 / max(1, self._fps)

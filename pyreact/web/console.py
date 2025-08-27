@@ -32,7 +32,6 @@ class ConsoleBuffer:
         return cls._instance
 
     def __init__(self) -> None:
-        # Avoid re-initialization in the singleton
         if getattr(self, "_initialized", False):
             return
 
@@ -50,18 +49,15 @@ class ConsoleBuffer:
             self._chunks.append(text)
             self._length += len(text)
 
-        # Notify subscribers OUTSIDE the lock to avoid deadlocks
         for cb in list(self._subs):
             try:
                 cb(text)
             except Exception:
-                # Do not break the flow due to subscriber errors
                 pass
 
     # ---------------- Public API ----------------
     def dump(self) -> str:
         with self._lock:
-            # join is O(n), but amortized and acceptable for moderate pages
             return "".join(self._chunks)
 
     def clear(self) -> None:

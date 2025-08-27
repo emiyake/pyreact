@@ -11,34 +11,25 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from urllib.parse import parse_qs
+from pyreact.boot.app_runner import AppRunner
 from pyreact.core.hook import HookContext
-from .console import (
-    ConsoleBuffer,
-    enable_web_print,
-    disable_web_print,
-)
 from .ansi import ansi_to_html
 from .ws_endpoint import (
     register_ws_routes,
-    CHAN_HTML,
-    CHAN_NAV,
-    CHAN_STDOUT,
-    CHAN_MSG,
-    CHAN_INPUT,
+    ChannelName,
 )
 from .state import ServerState
 from .input_consumer import InputConsumer
 from .templates import BASE_HTML
 
 
-def create_fastapi_app(runner):
+def create_fastapi_app(runner: AppRunner):
     """Create the FastAPI app with lifecycle via ``lifespan``.
 
     When ``app_runner`` is provided, the server bridges HTML/nav updates from the
     runner and forwards WebSocket inputs via runner.invoke/nav/print helpers.
     """
     app = FastAPI()
-    # Serve static assets (JS/CSS) from the package's static directory
     static_dir = Path(__file__).parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -48,41 +39,38 @@ def create_fastapi_app(runner):
         server_loop = asyncio.get_running_loop()
         state = ServerState()
 
-        enable_web_print()
-        console = HookContext.get_service("console_buffer", ConsoleBuffer)
-
-        def _on_console(text: str):
-            asyncio.create_task(_broadcast_stdout(text))
-
-        console.subscribe(_on_console)
-
-        async def publish_nav(path: str) -> None:
-            payload = json.dumps({"channel": "ui", "type": "nav", "path": path})
-            await state.broadcast.publish(CHAN_NAV, payload)
-
-        try:
-            runner.attach_web_bridge(
-                on_nav=publish_nav,
-                target_loop=server_loop,
-            )
-        except Exception:
-            pass
-
         async def _broadcast_stdout(text: str) -> None:
             if text.startswith("__MESSAGE__:"):
                 message_json = text[12:]  # Remove "__MESSAGE__:"
                 message_data = json.loads(message_json)
 
                 await state.broadcast.publish(
-                    CHAN_MSG,
+                    ChannelName.MSG,
                     {"channel": "chat", "type": "message", "data": message_data},
                 )
                 return
 
             await state.broadcast.publish(
-                CHAN_STDOUT,
-                {"channel": "logs", "type": "stdout", "html": ansi_to_html(text)},
+                ChannelName.STDOUT,
+                {"channel": "logs", "type": "stdout", "data": ansi_to_html(text)},
             )
+
+        async def publish_nav(path: str) -> None:
+            await state.broadcast.publish(
+                ChannelName.NAV, {"channel": "ui", "type": "nav", "data": path}
+            )
+
+        async def publish_console(text: str) -> None:
+            await _broadcast_stdout(text)
+
+        try:
+            runner.attach_web_bridge(
+                on_nav=publish_nav,
+                on_console=publish_console,
+                target_loop=server_loop,
+            )
+        except Exception:
+            pass
 
         async def _handle_input_message(msg: dict) -> None:
             t = msg.get("t")
@@ -119,7 +107,7 @@ def create_fastapi_app(runner):
                 value = msg.get("v", "")
                 if t == "submit" and value.strip():
                     await state.broadcast.publish(
-                        CHAN_MSG,
+                        ChannelName.MSG,
                         {
                             "channel": "chat",
                             "type": "message",
@@ -144,7 +132,7 @@ def create_fastapi_app(runner):
 
         input_consumer = InputConsumer(
             broadcast=state.broadcast,
-            input_channel=CHAN_INPUT,
+            input_channel=ChannelName.INPUT,
             handle_message=_handle_input_message,
         )
 
@@ -158,14 +146,12 @@ def create_fastapi_app(runner):
         register_ws_routes(
             app,
             broadcast=state.broadcast,
-            channels_to_forward=[CHAN_HTML, CHAN_NAV, CHAN_STDOUT, CHAN_MSG],
-            input_channel=CHAN_INPUT,
+            channels_to_forward=[ChannelName.NAV, ChannelName.STDOUT, ChannelName.MSG],
+            input_channel=ChannelName.INPUT,
         )
 
         # Initial SSR will already use stdout accumulated so far
         app.state._cleanup = {
-            "console": console,
-            "console_listener": _on_console,
             "render_task": None,
             "input_task": input_task,
         }
@@ -173,15 +159,12 @@ def create_fastapi_app(runner):
         try:
             yield
         finally:
-            console.unsubscribe(_on_console)
-
             if app.state._cleanup.get("render_task") is not None:
                 app.state._cleanup.get("render_task").cancel()
 
             runner.shutdown()
             input_task.cancel()
             HookContext._services.clear()
-            disable_web_print()
 
     app.router.lifespan_context = lifespan
 

@@ -36,6 +36,9 @@ def render_tree(ctx, indent: int = 0) -> None:
 
     pad = "  " * indent
 
+    if indent == 0:
+        print(f"{BOLD}{CYAN}=== VNode Tree ==={RESET}")
+
     def _fmt_val(v, depth: int = 0):
         # ANSI color helpers available via closure below
         if depth > 1:
@@ -72,9 +75,7 @@ def render_tree(ctx, indent: int = 0) -> None:
                 type(v), "__name__", "callable"
             )
             return f"{FG_GREEN}<fn {name}>{RESET}"
-        return f"{FG_GREEN}<{type(v).__name__}>{RESET}"
-
-    # ANSI helpers available from module scope
+        return f"{FG_GREEN}<{type(v).__name__}>{RESET}"  # ANSI helpers available from module scope
 
     name = getattr(ctx, "name", type(ctx).__name__)
     name_col = f"{FG_MAGENTA}{name}{RESET}"
@@ -88,6 +89,9 @@ def render_tree(ctx, indent: int = 0) -> None:
 
     for ch in getattr(ctx, "children", []) or []:
         render_tree(ch, indent + 1)
+
+    if indent == 0:
+        print(f"{BOLD}{CYAN}==================={RESET}\n")
 
 
 # ----------------------------------------------------------------------------
@@ -175,11 +179,6 @@ def print_last_trace() -> None:
         print("\x1b[90m[debug]\x1b[0m no render trace available yet.")
         return
     trace = _TRACE_LOG[-1]
-    BOLD = "\x1b[1m"
-    CYAN = "\x1b[36m"
-    GRAY = "\x1b[90m"
-    YELLOW = "\x1b[33m"
-    RESET = "\x1b[0m"
     print(f"\n{BOLD}{CYAN}=== Render Trace ==={RESET}")
     print(f"{GRAY}root:{RESET} {YELLOW}{trace['root_name']}{RESET}")
     if trace["reasons"]:

@@ -1,12 +1,33 @@
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Dict
+from typing import Callable, NotRequired, Optional, Dict, Union, TypeAlias, TypedDict
 from urllib.parse import urlparse, parse_qs
+
+ParamValue: TypeAlias = Union[str, int, float, bool]
+QueryValue: TypeAlias = Union[str, int, float, bool]
+
+
+class NavigateOptions(TypedDict):
+    path: str
+    params: NotRequired[Dict[str, ParamValue]]
+    query: NotRequired[Dict[str, QueryValue]]
+    fragment: NotRequired[str]
+
+
+NavigateFn: TypeAlias = Callable[
+    [
+        Union[str, NavigateOptions],
+        Optional[Dict[str, ParamValue]],
+        Optional[Dict[str, QueryValue]],
+        str,
+    ],
+    None,
+]
 
 
 @dataclass
 class NavService:
     subs: list[Callable[[str], None]] = field(default_factory=list)
-    navigate: Optional[Callable[[str], None]] = None
+    navigate: Optional["NavigateFn"] = None
     current: str = "/"
 
     def __getitem__(self, key):

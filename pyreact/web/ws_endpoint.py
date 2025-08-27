@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Iterable, Optional, Set
+from enum import StrEnum
+from typing import Iterable
 
 from fastapi import FastAPI, WebSocket
 from starlette.endpoints import WebSocketEndpoint
 from .broadcast import InMemoryBroadcast
 
 
-# Channel names
-CHAN_HTML = "html"
-CHAN_NAV = "nav"
-CHAN_STDOUT = "stdout"
-CHAN_MSG = "message"
-CHAN_INPUT = "input"
+class ChannelName(StrEnum):
+    NAV = "nav"
+    STDOUT = "stdout"
+    MSG = "message"
+    INPUT = "input"
 
 
 def register_ws_routes(
@@ -26,12 +26,9 @@ def register_ws_routes(
 ) -> None:
     """
     Register a WebSocket route that bridges pub/sub channels to the socket.
-
     - broadcast: object with publish(channel, message) and subscribe(channel) async context manager
-    - backlog_provider: returns pre-encoded payload strings to send on connect
     - channels_to_forward: channel names to forward from pub/sub to this socket
     - input_channel: channel name to publish all incoming client messages
-    - clients_set: optional set to track connected websockets (add/remove)
     """
 
     class AppWS(WebSocketEndpoint):

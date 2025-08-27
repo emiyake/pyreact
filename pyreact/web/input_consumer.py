@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Awaitable, Callable
+from .broadcast import InMemoryBroadcast
 
 
 class InputConsumer:
@@ -15,7 +16,7 @@ class InputConsumer:
     def __init__(
         self,
         *,
-        broadcast,
+        broadcast: InMemoryBroadcast,
         input_channel: str,
         handle_message: Callable[[dict], Awaitable[None]],
     ) -> None:

@@ -75,16 +75,12 @@
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg.channel === 'ui' && msg.type === 'html') {
-          document.getElementById('root').innerHTML = msg.html;
-          return;
-        }
         if (msg.channel === 'ui' && msg.type === 'nav') {
-          if (location.pathname !== msg.path) history.pushState({}, '', msg.path);
+          if (location.pathname !== msg.data) history.pushState({}, '', msg.data);
           return;
         }
         if (msg.channel === 'logs' && msg.type === 'stdout') {
-          const logElement = createLogEntry(msg.html);
+          const logElement = createLogEntry(msg.data);
           if (logElement) {
             chronologicalOutput.appendChild(logElement);
             scrollToBottom(chatContainer || chronologicalOutput);
@@ -92,28 +88,6 @@
           return;
         }
         if (msg.channel === 'chat' && msg.type === 'message') {
-          const messageElement = createChatMessage(msg.data);
-          chronologicalOutput.appendChild(messageElement);
-          scrollToBottom(chatContainer || chronologicalOutput);
-          return;
-        }
-        if (msg.type === 'html') {
-          document.getElementById('root').innerHTML = msg.html;
-          return;
-        }
-        if (msg.type === 'nav') {
-          if (location.pathname !== msg.path) history.pushState({}, '', msg.path);
-          return;
-        }
-        if (msg.type === 'stdout') {
-          const logElement = createLogEntry(msg.html);
-          if (logElement) {
-            chronologicalOutput.appendChild(logElement);
-            scrollToBottom(chatContainer || chronologicalOutput);
-          }
-          return;
-        }
-        if (msg.type === 'message') {
           const messageElement = createChatMessage(msg.data);
           chronologicalOutput.appendChild(messageElement);
           scrollToBottom(chatContainer || chronologicalOutput);

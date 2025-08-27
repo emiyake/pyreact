@@ -138,10 +138,9 @@ def ansi_to_html(s: str) -> str:
             open_style = new_style
 
     for m in _SGR_RE.finditer(s):
-        # emit text before match
         if m.start() > pos:
             out.append(html.escape(s[pos : m.start()]))
-        # update style
+
         _style_from_codes(m.group("codes"), state)
         open_span(_css_from_state(state))
         pos = m.end()

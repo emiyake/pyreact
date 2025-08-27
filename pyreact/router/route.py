@@ -2,7 +2,7 @@
 from typing import Dict, List, Optional, Any
 from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
-from pyreact.web.nav_service import NavService
+from .nav_service import NavService
 from .router import use_route  # function that reads RouterContext
 from .router import use_routes_catalog  # expose catalog to RouteAgent
 from .match import compile_route_pattern

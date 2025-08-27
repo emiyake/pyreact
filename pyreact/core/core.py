@@ -7,7 +7,6 @@ _context_stack = ContextVar("component_context", default=None)
 
 class _HookProxy:
     def __getattr__(self, name):
-        # ensure the correct component instance is used in the hook (set in HookContext.render)
         comp = _context_stack.get()
         if comp is None:
             raise RuntimeError(

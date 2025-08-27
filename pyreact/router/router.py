@@ -1,9 +1,19 @@
-from typing import Dict, Any, Optional, Union
+from typing import (
+    Dict,
+    Optional,
+    Union,
+)
 from urllib.parse import urlencode, urlparse, urlunparse
 import warnings
 from pyreact.core.core import component, hooks
 from pyreact.core.provider import create_context
-from pyreact.web.nav_service import NavService
+from .nav_service import (
+    NavService,
+    NavigateFn,
+    NavigateOptions,
+    ParamValue,
+    QueryValue,
+)
 from .match import matches as route_matches
 
 
@@ -17,8 +27,8 @@ def use_routes_catalog():
 
 def _build_url(
     path: str,
-    params: Optional[Dict[str, Any]] = None,
-    query: Optional[Dict[str, Any]] = None,
+    params: Optional[Dict[str, ParamValue]] = None,
+    query: Optional[Dict[str, QueryValue]] = None,  # noqa: F821
     fragment: str = "",
 ) -> str:
     """Build a URL with path parameters and query string"""
@@ -57,8 +67,8 @@ def use_route():
     # Navigate comes from the NavService (set by Router on mount)
     navsvc = hooks.get_service("nav_service", NavService)
 
-    def _navigate_live(*args, **kwargs):
-        svc_nav = getattr(navsvc, "navigate", None)
+    def _navigate_live(*args, **kwargs) -> NavigateFn:
+        svc_nav: NavigateFn = getattr(navsvc, "navigate", None)
         if callable(svc_nav):
             return svc_nav(*args, **kwargs)
         warnings.warn("navigate called before Router mounted")
@@ -98,13 +108,13 @@ def Router(*, initial=None, children):
     hooks.use_effect(lambda: (RouteContext.set(navsvc.current), None)[1], [navsvc])
 
     # Ensure NavService has a stable navigate function
-    def _make_navigate(svc):
+    def _make_navigate(svc) -> NavigateFn:
         def navigate(
-            new_path: Union[str, Dict[str, Any]],
-            params: Optional[Dict[str, Any]] = None,
-            query: Optional[Dict[str, Any]] = None,
+            new_path: Union[str, NavigateOptions],  # noqa: F821
+            params: Optional[Dict[str, ParamValue]] = None,
+            query: Optional[Dict[str, QueryValue]] = None,
             fragment: str = "",
-        ):
+        ) -> None:
             """
             Navigate to a new path with optional parameters and query string.
 
@@ -130,13 +140,11 @@ def Router(*, initial=None, children):
 
         return navigate
 
-    navigate_fn = hooks.use_memo(lambda: _make_navigate(navsvc), [navsvc])
+    navigate_fn: NavigateFn = hooks.use_memo(lambda: _make_navigate(navsvc), [navsvc])
     navsvc.navigate = navigate_fn
 
     # Use the CURRENT path from the service
     current_path_only = navsvc.current
-
-    # Only render the first matching <Route> child
 
     current_path_for_match = current_path_only.split("?")[0]
 
