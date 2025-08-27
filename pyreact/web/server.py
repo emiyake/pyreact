@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 from pyreact.boot.app_runner import AppRunner
 from pyreact.core.hook import HookContext
+from .console import enable_web_print, disable_web_print
 from .broadcast import InMemoryBroadcast
 from .ansi import ansi_to_html
 from .ws_endpoint import (
@@ -37,6 +38,7 @@ def create_fastapi_app(runner: AppRunner):
     async def lifespan(app: FastAPI):
         server_loop = asyncio.get_running_loop()
         broadcast = InMemoryBroadcast()
+        enable_web_print()
 
         async def _broadcast_stdout(text: str) -> None:
             if text.startswith("__MESSAGE__:"):
@@ -141,6 +143,7 @@ def create_fastapi_app(runner: AppRunner):
             runner.shutdown()
             input_task.cancel()
             HookContext._services.clear()
+            disable_web_print()
 
     app.router.lifespan_context = lifespan
 

@@ -1,5 +1,4 @@
-from pyreact.core.core import component, hooks
-from pyreact.web.console import ConsoleBuffer
+from pyreact.core import component, hooks, MessageBuffer
 from typing import Literal
 import json
 import time
@@ -25,7 +24,7 @@ def Message(
 
     def _send_message():
         # Sends the message to the console buffer with special formatting
-        console = ConsoleBuffer()
+        console = MessageBuffer()
 
         # Creates a structured message object
         message_data = {
@@ -42,39 +41,6 @@ def Message(
 
         # Sends to the console buffer
         console.append(message_text)
-
-        # To ensure it works in the terminal, also prints directly
-        import sys
-
-        try:
-            # Tries to print directly to the original terminal
-            sender_colors = {
-                "user": "\x1b[34m",  # Blue
-                "system": "\x1b[90m",  # Gray
-                "assistant": "\x1b[32m",  # Green
-            }
-            type_colors = {
-                "chat": "",
-                "info": "\x1b[36m",  # Cyan
-                "warning": "\x1b[33m",  # Yellow
-                "error": "\x1b[31m",  # Red
-            }
-
-            color = sender_colors.get(sender, "") + type_colors.get(message_type, "")
-            reset = "\x1b[0m"
-
-            formatted_text = f"{color}[{sender.upper()}] {text}{reset}\n"
-
-            # Tries different methods to print to the terminal
-            if hasattr(sys.stdout, "_original") and sys.stdout._original is not None:
-                sys.stdout._original.write(formatted_text)
-                sys.stdout._original.flush()
-            else:
-                # Fallback: print directly
-                print(formatted_text, end="", flush=True)
-        except Exception:
-            # If it fails, use normal print
-            print(f"[{sender.upper()}] {text}")
 
     hooks.use_effect(_send_message, deps)
     return []

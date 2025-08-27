@@ -8,7 +8,7 @@ from pyreact.core.hook import HookContext
 from pyreact.core.runtime import run_renders, schedule_rerender, get_render_idle
 from pyreact.input.bus import InputBus
 from pyreact.router.nav_service import NavService
-from pyreact.web.console import ConsoleBuffer, enable_web_print, disable_web_print
+from pyreact.web.console import MessageBuffer
 
 
 def _emit_text_and_submit(bus: InputBus, text: str) -> None:
@@ -84,7 +84,7 @@ class AppRunner:
         # Remove console buffer listener
         try:
             if self._console_listener is not None:
-                console = HookContext.get_service("console_buffer", ConsoleBuffer)
+                console = HookContext.get_service("console_buffer", MessageBuffer)
                 try:
                     console.unsubscribe(self._console_listener)
                 except Exception:
@@ -92,8 +92,6 @@ class AppRunner:
                 self._console_listener = None
         except Exception:
             pass
-
-        disable_web_print()
 
         # Remove nav listener
         try:
@@ -240,8 +238,8 @@ class AppRunner:
         self._on_nav = _wrap(on_nav)
         self._on_console = _wrap(on_console)
 
-        if self._on_console is not None:
-            enable_web_print()
+        # if self._on_console is not None:
+        #     enable_web_print()
 
     # -------------------------------
     # Internal: loop thread
@@ -281,7 +279,7 @@ class AppRunner:
 
         # Bridge console buffer appends to server publisher
         try:
-            console = HookContext.get_service("console_buffer", ConsoleBuffer)
+            console = HookContext.get_service("console_buffer", MessageBuffer)
 
             def _console_listener(text: str) -> None:
                 try:

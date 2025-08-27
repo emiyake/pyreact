@@ -159,7 +159,7 @@ def QAAgent(question: str):
             )
         ]
 
-    if result is None:
+    if result[0] is None:
         return []
 
     return [
@@ -258,7 +258,11 @@ def Home():
             message_type="info",
             trigger="mount",
         ),
-        ProjectRouterAgent(key="agent-router", message=user_query),
+        ProjectRouterAgent(
+            key="agent-router",
+            message=user_query,
+            on_navigate=lambda x, y: print(f"Navigating to {x} (ver: {y})"),
+        ),
     ]
 
 
@@ -311,7 +315,12 @@ def App():
                     path="/home/:id",
                     name="home",
                     description="Página inicial com informações gerais",
-                    utterances=["ir para home", "abrir página inicial"],
+                    utterances=[
+                        "ir para home",
+                        "abrir página inicial",
+                        "recomeçar",
+                        "reiniciar",
+                    ],
                     default_params={"id": "1"},
                     children=[Home(key="home")],
                 ),
@@ -327,11 +336,10 @@ def App():
                     key="r3",
                     path="/qa",
                     name="qa",
-                    description="Perguntas e respostas assistidas por LLM",
+                    description="Perguntas e respostas assistidas sobre questões financeiras",
                     utterances=[
                         "Dúvidas sobre contratos",
                         "Dúvdias sobre pagamento",
-                        "perguntar",
                     ],
                     children=[QAHome(key="qa")],
                 ),

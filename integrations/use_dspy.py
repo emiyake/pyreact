@@ -22,21 +22,21 @@ def use_dspy_call(
                 "status": "loading",
                 "result": state["result"],
                 "error": None,
-                "ver": state["ver"],
+                "ver": state["ver"] + 1,
             }
         if typ == "success":
             return {
                 "status": "idle",
                 "result": action["result"],
                 "error": None,
-                "ver": action["ver"],
+                "ver": state["ver"],
             }
         if typ == "error":
             return {
                 "status": "idle",
-                "result": state["result"],
+                "result": None,
                 "error": action["error"],
-                "ver": action["ver"],
+                "ver": state["ver"],
             }
         return state
 
@@ -61,7 +61,6 @@ def use_dspy_call(
         current_task = asyncio.current_task()
 
         try:
-            ver = id(inspect.currentframe())
             if lm is not None:
                 selected_lm = lm
             elif env is not None and model is not None:
@@ -108,14 +107,14 @@ def use_dspy_call(
                         "DSPy module has no acall/apredict/predict/__call__ to invoke"
                     )
 
-            result = (await _call(), ver)
+            result = await _call()
 
             if alive_ref["alive"] and task_ref["task"] is current_task:
-                dispatch({"type": "success", "result": result, "ver": ver})
+                dispatch({"type": "success", "result": result})
 
         except Exception as e:
             if alive_ref["alive"] and task_ref["task"] is current_task:
-                dispatch({"type": "error", "error": e, "ver": ver})
+                dispatch({"type": "error", "error": e})
 
     def _run(**inputs):
         dispatch({"type": "start"})
@@ -123,4 +122,9 @@ def use_dspy_call(
         task_ref["task"] = t
 
     run = hooks.use_callback(_run, deps=[id(module)])
-    return run, state["result"], state["status"] == "loading", state["error"]
+    return (
+        run,
+        (state["result"], state["ver"]),
+        state["status"] == "loading",
+        state["error"],
+    )

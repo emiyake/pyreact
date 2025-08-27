@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Any
+from typing import Callable, List, Dict, Optional, Any, TypedDict
 import dspy
 
 from message import Message
@@ -8,18 +8,25 @@ from integrations.use_dspy import use_dspy_call
 from integrations.dspy_integration import use_dspy_module
 
 
-# ---------------- LLM module (optional) -----------------
+class Path(TypedDict):
+    path: str
+    description: str
+    utterances: List[str]
+    params: Optional[Dict[str, Any]]
+
+
 class RouteSelectionSig(dspy.Signature):
     """Choose the best route for the message.
 
     Instructions:
     - Return ONLY the exact path of one of the provided routes.
     - If nothing is appropriate, return None.
-    - Consider name, description, and utterances.
+    - Consider description and utterances.
+    - Utterances are the examples of how the user can ask for the route.
     """
 
     message: str = dspy.InputField()
-    routes_text: str = dspy.InputField()
+    possible_routes: List[Path] = dspy.InputField(description="List of possible routes")
     path: str = dspy.OutputField()
 
 
@@ -28,115 +35,53 @@ def _is_parametrized(path: str) -> bool:
 
 
 @component
-def RouterAgent(
-    message: str,
-    *,
-    routes_meta: Optional[List[Dict[str, Any]]] = None,
-    model: Optional[str] = "fast",
-    children=None,
-):
-    """
-    Decide a route from a free-text `message` and navigate to it.
-
-    - Read available routes from context via `use_routes_catalog()`.
-    - Optionally merge additional metadata: description, utterances, default params.
-    - If a `resolver(message, candidates)` is provided, its return (path) wins.
-    - Otherwise, apply heuristic scoring against names, paths, descriptions, utterances.
-
-    Example `routes_meta` item:
-        {
-          "path": "/about",
-          "name": "about",
-          "description": "Information about the app",
-          "utterances": ["go to about", "open about"],
-          "params": {"id": "1"}
-        }
-    """
-    current_full, navigate = use_route()
+def RouterAgent(*, message: str, on_navigate: Callable[[str, int], None]):
     catalog = use_routes_catalog() or []
-    state, set_state = hooks.use_state(
-        {"last_message": None, "last_ver": None, "requested_for": None}
-    )
 
     choose_mod = use_dspy_module(
         RouteSelectionSig, dspy.ChainOfThought, name="router-agent"
     )
-    call_llm, llm_result, llm_loading, llm_error = use_dspy_call(
-        choose_mod, model=model
+    call_llm, llm_result, llm_loading, _llm_error = use_dspy_call(
+        choose_mod, model="fast"
     )
 
-    def _routes_text(lst: List[Dict[str, Any]]) -> str:
-        lines: List[str] = []
-        for i, e in enumerate(lst, start=1):
-            nm = e.get("name") or ""
-            pt = e.get("path") or ""
-            ds = (e.get("description") or "").strip()
-            uts = ", ".join((e.get("utterances") or [])[:4])
-            param_note = (
-                " (needs params)"
-                if _is_parametrized(pt) and not e.get("params")
-                else ""
+    def _routes_mapper(routes: List[Dict[str, Any]]) -> List[Path]:
+        catalog: List[str] = []
+        for route in routes:
+            catalog.append(
+                {
+                    "path": route.get("path") or "",
+                    "description": route.get("description") or "",
+                    "utterances": route.get("utterances") or [],
+                    "params": route.get("params"),
+                }
             )
-            lines.append(
-                f"{i}. name={nm} path={pt}{param_note}\n   desc={ds}\n   utts=[{uts}]"
-            )
-        return "\n".join(lines)
 
-    # --------------- Decide and navigate -------------------
+        return catalog
+
     def _effect_decide():
         if not isinstance(message, str) or not message.strip():
             return
-        # Avoid repeated LLM calls for the same message during re-renders
-        if state.get("requested_for") == message:
-            return
-        set_state(
-            {
-                "last_message": state.get("last_message"),
-                "last_ver": state.get("last_ver"),
-                "requested_for": message,
-            }
-        )
-        call_llm(message=message, routes_text=_routes_text(catalog))
+        call_llm(message=message, possible_routes=_routes_mapper(catalog))
 
-    hooks.use_effect(_effect_decide, [message, str(catalog), str(routes_meta)])
+    hooks.use_effect(_effect_decide, [message])
 
     def _effect_llm_nav():
         if llm_result is None:
             return
+
         mod_res, ver = llm_result
-        if state.get("last_ver") == ver:
+        if mod_res is None:
             return
 
         path_raw = getattr(mod_res, "path", None)
-        if isinstance(path_raw, str):
-            # Strip code fences/quotes/spaces just in case
-            path_clean = path_raw.strip().strip('`" ')
-        else:
-            path_clean = None
+        reasoning = getattr(mod_res, "reasoning", None)
+        print(f"Reasoning: {reasoning}")
+        on_navigate(path_raw, ver)
 
-        target_path: Optional[str] = None
-        params_to_use: Optional[Dict[str, Any]] = None
-
-        # Accept only known candidate paths or '/'
-        paths = {e.get("path"): e for e in catalog}
-        if path_clean in paths:
-            target_path = path_clean
-            params_to_use = paths[path_clean].get("params")
-        elif path_clean == "/":
-            target_path = "/"
-            params_to_use = None
-
-        set_state({"last_message": message, "last_ver": ver, "requested_for": None})
-        if target_path is not None:
-            current_base = current_full.split("?")[0]
-            if current_base != target_path:
-                print(f"Navigating to {target_path}")
-                navigate(target_path, params=params_to_use)
-
-    hooks.use_effect(_effect_llm_nav, [llm_result, message, current_full])
+    hooks.use_effect(_effect_llm_nav, [llm_result])
 
     if llm_loading:
         return [Message(text="Router agent, verificando rota...", sender="system")]
 
-    # if state.get("last_ver") == message:
-    return children or []
+    return []

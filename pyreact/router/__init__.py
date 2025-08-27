@@ -5,7 +5,6 @@ from .route import (
     use_route_params,
     use_query_params,
     use_navigate,
-    RouteAgent,
 )
 
 __all__ = [
@@ -16,5 +15,4 @@ __all__ = [
     "use_route_params",
     "use_query_params",
     "use_navigate",
-    "RouteAgent",
 ]
