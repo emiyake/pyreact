@@ -29,6 +29,7 @@ class NavService:
     subs: list[Callable[[str], None]] = field(default_factory=list)
     navigate: Optional["NavigateFn"] = None
     current: str = "/"
+    on_navigate: Optional[Callable[[str], None]] = None
 
     def __getitem__(self, key):
         return getattr(self, key)
@@ -61,7 +62,17 @@ class NavService:
 
     def commit(self, final_url: str) -> None:
         """Set current URL and notify subscribers."""
+        prev = self.current
         self.current = final_url
+
+        # Clear input before subscribers re-render (e.g. Router),
+        # so the new route receives input="" instead of stale input.
+        if self.on_navigate is not None and final_url != prev:
+            try:
+                self.on_navigate(final_url)
+            except Exception:
+                pass
+
         for fn in list(self.subs):
             try:
                 fn(final_url)

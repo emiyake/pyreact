@@ -6,7 +6,6 @@ import json
 import time
 from contextlib import asynccontextmanager
 
-
 from fastapi import FastAPI, Response, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,7 +13,6 @@ from pathlib import Path
 from urllib.parse import parse_qs
 from pyreact.boot.app_runner import AppRunner
 from pyreact.core.hook import HookContext
-from pyreact.core import MessageBuffer
 from .console import enable_web_print, disable_web_print
 from .broadcast import InMemoryBroadcast
 from .ansi import ansi_to_html
@@ -29,8 +27,9 @@ from .templates import BASE_HTML
 def create_fastapi_app(runner: AppRunner):
     """Create the FastAPI app with lifecycle via ``lifespan``.
 
-    When ``app_runner`` is provided, the server bridges HTML/nav updates from the
-    runner and forwards WebSocket inputs via runner.invoke/nav/print helpers.
+    The server subscribes directly to ``MessageBuffer`` and ``NavService``
+    for component output, and uses ``runner.forward()`` for user input.
+    No bridge callbacks are needed on the AppRunner side.
     """
     app = FastAPI()
     static_dir = Path(__file__).parent / "static"
@@ -44,11 +43,11 @@ def create_fastapi_app(runner: AppRunner):
         broadcast = InMemoryBroadcast()
         enable_web_print()
 
+        # ---- helpers ------------------------------------------------
         async def _broadcast_stdout(text: str) -> None:
             if text.startswith("__MESSAGE__:"):
-                message_json = text[12:]  # Remove "__MESSAGE__:"
+                message_json = text[12:]
                 message_data = json.loads(message_json)
-
                 await broadcast.publish(
                     ChannelName.MSG,
                     {"channel": "chat", "type": "message", "data": message_data},
@@ -60,20 +59,38 @@ def create_fastapi_app(runner: AppRunner):
                 {"channel": "logs", "type": "stdout", "data": ansi_to_html(text)},
             )
 
-        async def publish_nav(path: str) -> None:
-            await broadcast.publish(
-                ChannelName.NAV, {"channel": "ui", "type": "nav", "data": path}
-            )
+        # ---- direct subscriptions -----------------------------------
+        # Subscribe to MessageBuffer (singleton) for component output.
+        # The callback fires synchronously in the runner thread, so we
+        # marshal to the server loop with run_coroutine_threadsafe.
+        console = runner.get_message_buffer()
 
-        async def publish_console(text: str) -> None:
-            await _broadcast_stdout(text)
+        def _on_console(text: str) -> None:
+            try:
+                asyncio.run_coroutine_threadsafe(_broadcast_stdout(text), server_loop)
+            except Exception:
+                pass
 
-        runner.attach_web_bridge(
-            on_nav=publish_nav,
-            on_console=publish_console,
-            target_loop=server_loop,
-        )
+        console.subscribe(_on_console)
 
+        # Subscribe to NavService for navigation events.
+        navsvc = runner.get_nav_service()
+
+        def _on_nav(path: str) -> None:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    broadcast.publish(
+                        ChannelName.NAV,
+                        {"channel": "ui", "type": "nav", "data": path},
+                    ),
+                    server_loop,
+                )
+            except Exception:
+                pass
+
+        navsvc.subs.append(_on_nav)
+
+        # ---- input handling -----------------------------------------
         async def _handle_input_message(msg: dict) -> None:
             t = msg.get("t")
 
@@ -86,7 +103,6 @@ def create_fastapi_app(runner: AppRunner):
                 if len(raw_query) > 0:
                     q = raw_query[1:] if raw_query.startswith("?") else raw_query
                     parsed_q = parse_qs(q)
-
                     query = {
                         k: (v[0] if isinstance(v, list) and v else "")
                         for k, v in parsed_q.items()
@@ -99,7 +115,6 @@ def create_fastapi_app(runner: AppRunner):
                 # Replay buffered messages on connect so mount-time
                 # messages (welcome, routes, etc.) reach the client.
                 if t == "hello":
-                    console = MessageBuffer()
                     for chunk in list(console._chunks):
                         await _broadcast_stdout(chunk.rstrip("\n"))
 
@@ -126,10 +141,6 @@ def create_fastapi_app(runner: AppRunner):
 
                 async def _run_forward():
                     try:
-                        # Components emit their own Message()s via
-                        # MessageBuffer → _console_listener → broadcast.
-                        # We only need to drive the forward(); the result
-                        # is already delivered by the component tree.
                         await asyncio.to_thread(runner, value)
                     except Exception:
                         pass
@@ -144,7 +155,7 @@ def create_fastapi_app(runner: AppRunner):
                 elif what == "trace":
                     runner.print_render_trace()
 
-        # Register WebSocket routes
+        # ---- WebSocket routes & consumer ----------------------------
         register_ws_routes(
             app,
             broadcast=broadcast,
@@ -163,6 +174,16 @@ def create_fastapi_app(runner: AppRunner):
         try:
             yield
         finally:
+            # Cleanup subscriptions
+            try:
+                console.unsubscribe(_on_console)
+            except Exception:
+                pass
+            try:
+                navsvc.subs.remove(_on_nav)
+            except Exception:
+                pass
+
             runner.shutdown()
             input_task.cancel()
             HookContext._services.clear()

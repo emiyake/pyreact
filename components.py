@@ -137,6 +137,7 @@ def QAAgent(question: str):
     def _call_dspy():
         if not question.strip():
             return
+
         call_dspy(question=question)
 
     hooks.use_effect(_call_dspy, [question])
@@ -217,6 +218,7 @@ def Home(input=""):
     )
 
     def _on_input_change():
+        print(f"Input: {input}")
         if input and input.strip():
             set_user_query(input)
 
@@ -265,6 +267,7 @@ def Home(input=""):
 @component
 def About(input=""):
     query_params = use_query_params()
+    navigate = use_navigate()
     search_text = (
         f" (Search: {query_params.get('search', 'none')})"
         if query_params.get("search")
@@ -275,6 +278,9 @@ def About(input=""):
         if query_params.get("filter")
         else ""
     )
+    if input and input.strip() == "home":
+        navigate("/home/3")
+        return []
     return [
         Result(key="result", value=f"About page:{search_text}{filter_text} {input}"),
         Message(
@@ -286,7 +292,7 @@ def About(input=""):
         ),
         Message(
             key="help2",
-            text="Press 'h' to go home with params, 's' to add search query",
+            text="Type 'home' to go home with params",
             sender="system",
             message_type="log",
             trigger="mount",

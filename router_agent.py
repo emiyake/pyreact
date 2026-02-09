@@ -3,7 +3,7 @@ import dspy
 
 from message import Message
 from pyreact.core.core import component, hooks
-from pyreact.router import use_route, use_routes_catalog
+from pyreact.router import use_routes_catalog
 from integrations.use_dspy import use_dspy_call
 from integrations.dspy_integration import use_dspy_module
 
@@ -75,6 +75,11 @@ def RouterAgent(*, message: str, on_navigate: Callable[[str, int], None]):
             return
 
         path_raw = getattr(mod_res, "path", None)
+        if path_raw == "None":
+            print("Path raw is None")
+            return
+
+        print(f"On navigate: {path_raw}")
         on_navigate(path_raw, ver)
 
     hooks.use_effect(_effect_llm_nav, [llm_result])
