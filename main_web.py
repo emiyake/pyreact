@@ -1,5 +1,6 @@
-from pyreact.boot import run_web
+from pyreact.boot import bootstrap
 from pyreact.core.core import component
+from pyreact.web.server import create_fastapi_app
 from components import Root
 import os
 import dotenv
@@ -7,7 +8,7 @@ import dspy
 
 
 @component
-def Boot():
+def Boot(input=""):
     dotenv.load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY")
     lm_default = dspy.LM("openai/gpt-4o", api_key=api_key)
@@ -18,8 +19,12 @@ def Boot():
         "reasoning": lm_default,
     }
 
-    return [Root(key="root", models=models)]
+    return [Root(key="root", models=models, input=input)]
 
 
 if __name__ == "__main__":
-    run_web(Boot, host="127.0.0.1", port=8000)
+    import uvicorn
+
+    myapp = bootstrap(Boot, fps=20)
+    fastapi_app, _ = create_fastapi_app(myapp)
+    uvicorn.run(fastapi_app, host="127.0.0.1", port=8000)

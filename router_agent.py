@@ -75,13 +75,18 @@ def RouterAgent(*, message: str, on_navigate: Callable[[str, int], None]):
             return
 
         path_raw = getattr(mod_res, "path", None)
-        reasoning = getattr(mod_res, "reasoning", None)
-        print(f"Reasoning: {reasoning}")
         on_navigate(path_raw, ver)
 
     hooks.use_effect(_effect_llm_nav, [llm_result])
 
     if llm_loading:
-        return [Message(text="Router agent, verificando rota...", sender="system")]
+        return [
+            Message(
+                key="loading",
+                text="Router agent, verificando rota...",
+                sender="system",
+                message_type="log",
+            )
+        ]
 
     return []

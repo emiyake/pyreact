@@ -4,9 +4,9 @@ from .app_runner import AppRunner
 
 
 async def read_terminal_and_invoke(
-    app: AppRunner, *, prompt: str = ">> ", wait: bool = True
+    app: AppRunner, *, prompt: str = ">> ", timeout: float = 30.0
 ):
-    """Minimal async loop that reads lines from stdin and forwards to app.invoke().
+    """Minimal async loop that reads lines from stdin and forwards to app.forward().
 
     Built-in commands (prefix with ':' or '/'):
       - :tree            → app.print_vnode_tree()
@@ -77,9 +77,20 @@ async def read_terminal_and_invoke(
             if s in (":q", ":quit", ":exit"):
                 break
             try:
-                app.invoke(txt, wait=wait)
-            except Exception:
-                # Keep the loop resilient to user code errors
-                pass
+                result = await loop.run_in_executor(
+                    None, lambda: app.forward(txt, timeout=timeout)
+                )
+                if result is not None:
+                    GREEN = "\x1b[32m"
+                    RESET = "\x1b[0m"
+                    print(f"{GREEN}{result}{RESET}")
+            except TimeoutError as e:
+                YELLOW = "\x1b[33m"
+                RESET = "\x1b[0m"
+                print(f"{YELLOW}[timeout] {e}{RESET}")
+            except Exception as e:
+                RED = "\x1b[31m"
+                RESET = "\x1b[0m"
+                print(f"{RED}[error] {e}{RESET}")
     except (KeyboardInterrupt, SystemExit):
         pass

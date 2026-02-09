@@ -152,6 +152,33 @@ class HookContext:
         self.hook_idx += 1
         return self.hooks[idx][0]
 
+    def use_result(self, value):
+        """Signal that the current forward() invocation should resolve with ``value``.
+
+        This hook does NOT consume a hook slot. It is a side-effect-only
+        mechanism that resolves the active ForwardRequest's future.
+
+        - If no forward is active (e.g. interactive InputBus mode) → no-op.
+        - If ``value is None`` → marks the forward as *pending* (component
+          is still working) so the idle watchdog does not time out early.
+        - Only the first non-None call resolves the future; subsequent calls
+          in the same forward invocation are ignored.
+        """
+        from .forward import _active_forward
+
+        fwd = _active_forward.get(None)
+        if fwd is None or fwd.resolved:
+            return
+
+        if value is None:
+            # Component is aware of the forward but still loading.
+            fwd.pending = True
+            return
+
+        fwd.resolved = True
+        if not fwd.future.done():
+            fwd.future.set_result(value)
+
     def use_context(self, ctx_like):
         ctx = getattr(ctx_like, "_ctx", ctx_like)
 
@@ -226,7 +253,8 @@ class HookContext:
             def exit_render(*_args, **_kw):  # type: ignore
                 return None
 
-        token = core._context_stack.set(self)
+        prev_ctx = core._context_stack.get(None)
+        core._context_stack.set(self)
 
         try:
             _depth_token = enter_render(self)
@@ -303,7 +331,7 @@ class HookContext:
             except Exception:
                 pass
             # 8. restore previous component and original stack
-            core._context_stack.reset(token)
+            core._context_stack.set(prev_ctx)
 
     async def run_effects(self):
         for fx, deps, idx in self.effects:

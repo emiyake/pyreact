@@ -163,13 +163,15 @@ def enter_render(ctx: Any) -> Any:
             "key": getattr(ctx, "key", None),
         }
     )
-    return _TRACE_DEPTH.set(depth + 1)
+    prev_depth = depth
+    _TRACE_DEPTH.set(depth + 1)
+    return prev_depth
 
 
-def exit_render(token: Any) -> None:
+def exit_render(prev_depth: Any) -> None:
     try:
-        if token is not None:
-            _TRACE_DEPTH.reset(token)
+        if prev_depth is not None:
+            _TRACE_DEPTH.set(prev_depth)
     except Exception:
         pass
 

@@ -70,42 +70,50 @@ def use_dspy_call(
             else:
                 selected_lm = None  # fall back to dspy global default if configured
 
-            async def _call():
+            def _check_lm():
                 if selected_lm is not None:
-                    ctx_mgr = dspy.context(lm=selected_lm)
+                    return
+                if env is None:
+                    raise RuntimeError(
+                        "DSPy context not available. This may happen during server-side rendering. "
+                        "Please ensure DSPyProvider is properly configured with API keys."
+                    )
+                elif not env.models.get("default"):
+                    raise RuntimeError(
+                        "DSPy provider not fully initialized. This is normal during server-side rendering. "
+                        "The application will work correctly once the client-side JavaScript loads."
+                    )
                 else:
-                    # Provide more helpful error message for SSR scenarios
-                    if env is None:
-                        raise RuntimeError(
-                            "DSPy context not available. This may happen during server-side rendering. "
-                            "Please ensure DSPyProvider is properly configured with API keys."
-                        )
-                    elif not env.models.get("default"):
-                        raise RuntimeError(
-                            "DSPy provider not fully initialized. This is normal during server-side rendering. "
-                            "The application will work correctly once the client-side JavaScript loads."
-                        )
-                    else:
-                        raise RuntimeError(
-                            f"No language model configured. Available models: {list(env.models.keys())}. "
-                            "Please check your DSPyProvider configuration."
-                        )
+                    raise RuntimeError(
+                        f"No language model configured. Available models: {list(env.models.keys())}. "
+                        "Please check your DSPyProvider configuration."
+                    )
 
-                with ctx_mgr:
-                    acall = getattr(module, "acall", None)
-                    if acall is not None and inspect.iscoroutinefunction(acall):
-                        return await acall(**inputs)
-                    apredict = getattr(module, "apredict", None)
-                    if apredict is not None and inspect.iscoroutinefunction(apredict):
-                        return await apredict(**inputs)
+            _check_lm()
+
+            def _sync_call():
+                """Run DSPy module synchronously inside the worker thread
+                so the dspy.context set/reset stays in the same thread."""
+                with dspy.context(lm=selected_lm):
                     predict = getattr(module, "predict", None)
                     if callable(predict):
-                        return await asyncio.to_thread(predict, **inputs)
+                        return predict(**inputs)
                     if callable(module):
-                        return await asyncio.to_thread(module, **inputs)
+                        return module(**inputs)
                     raise AttributeError(
-                        "DSPy module has no acall/apredict/predict/__call__ to invoke"
+                        "DSPy module has no predict/__call__ to invoke"
                     )
+
+            async def _call():
+                acall = getattr(module, "acall", None)
+                if acall is not None and inspect.iscoroutinefunction(acall):
+                    with dspy.context(lm=selected_lm):
+                        return await acall(**inputs)
+                apredict = getattr(module, "apredict", None)
+                if apredict is not None and inspect.iscoroutinefunction(apredict):
+                    with dspy.context(lm=selected_lm):
+                        return await apredict(**inputs)
+                return await asyncio.to_thread(_sync_call)
 
             result = await _call()
 

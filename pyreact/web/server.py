@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import time
 from contextlib import asynccontextmanager
@@ -13,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 from pyreact.boot.app_runner import AppRunner
 from pyreact.core.hook import HookContext
+from pyreact.core import MessageBuffer
 from .console import enable_web_print, disable_web_print
 from .broadcast import InMemoryBroadcast
 from .ansi import ansi_to_html
@@ -33,6 +35,8 @@ def create_fastapi_app(runner: AppRunner):
     app = FastAPI()
     static_dir = Path(__file__).parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    _server_msg_counter = itertools.count(1)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -92,6 +96,13 @@ def create_fastapi_app(runner: AppRunner):
                     raw_fragment[1:] if raw_fragment.startswith("#") else raw_fragment
                 )
 
+                # Replay buffered messages on connect so mount-time
+                # messages (welcome, routes, etc.) reach the client.
+                if t == "hello":
+                    console = MessageBuffer()
+                    for chunk in list(console._chunks):
+                        await _broadcast_stdout(chunk.rstrip("\n"))
+
                 runner.nav(path, query=query, fragment=fragment)
                 return
 
@@ -104,6 +115,7 @@ def create_fastapi_app(runner: AppRunner):
                         "type": "message",
                         "data": {
                             "type": "message",
+                            "msg_id": f"srv-{next(_server_msg_counter)}",
                             "text": value,
                             "sender": "user",
                             "message_type": "chat",
@@ -111,7 +123,18 @@ def create_fastapi_app(runner: AppRunner):
                         },
                     },
                 )
-                runner.invoke(value, wait=True)
+
+                async def _run_forward():
+                    try:
+                        # Components emit their own Message()s via
+                        # MessageBuffer → _console_listener → broadcast.
+                        # We only need to drive the forward(); the result
+                        # is already delivered by the component tree.
+                        await asyncio.to_thread(runner, value)
+                    except Exception:
+                        pass
+
+                asyncio.create_task(_run_forward())
                 return
 
             if t == "debug":

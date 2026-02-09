@@ -19,13 +19,17 @@ def provider(ctx_var, *, prop="value"):
             except KeyError:
                 raise TypeError(f"Provider missing required prop '{prop}'")
 
-            token = ctx_var.set(value)
+            # Set the context value. It must persist between renders so that
+            # child components re-rendered in isolation (via dispatch/set_state)
+            # can still read it.  We only restore on unmount.
+            prev = ctx_var.get()
+            ctx_var.set(value)
 
-            def cleanup():
-                ctx_var.reset(token)
+            def unmount_cleanup():
+                ctx_var.set(prev)
 
-            # register the cleanup – runs on the next commit or unmount
-            hooks.use_effect(lambda: cleanup, [value])
+            # Empty deps [] = mount-only effect; cleanup runs only on unmount.
+            hooks.use_effect(lambda: unmount_cleanup, [])
 
             return body_fn(**props)
 

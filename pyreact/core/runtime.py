@@ -42,6 +42,7 @@ def schedule_rerender(ctx, reason: str = None):
 
     def _enqueue():
         try:
+            get_render_idle().clear()  # no longer idle — render pending
             rerender_queue.put_nowait(ctx)
         finally:
             get_render_signal().set()  # Set the signal only after the ctx is in the queue to avoid races

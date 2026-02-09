@@ -10,6 +10,7 @@
   let retries = 0;
   const maxDelay = 10000; // 10s cap
   let heartbeat;
+  const seenMsgIds = new Set(); // dedup message IDs
 
   function scrollToBottom(el){ try{ el.scrollTop = el.scrollHeight; }catch{} }
   function isOpen() { return ws && ws.readyState === WebSocket.OPEN; }
@@ -55,6 +56,10 @@
 
     ws.onopen = () => {
       retries = 0;
+      // Clear chat and dedup set on reconnect; the server will replay
+      // buffered messages via the "hello" handler.
+      seenMsgIds.clear();
+      chronologicalOutput.innerHTML = '';
       try {
         ws.send(
           JSON.stringify({
@@ -88,6 +93,12 @@
           return;
         }
         if (msg.channel === 'chat' && msg.type === 'message') {
+          // Deduplicate by msg_id (set by Message component / server)
+          const mid = msg.data && msg.data.msg_id;
+          if (mid != null) {
+            if (seenMsgIds.has(mid)) return; // already rendered
+            seenMsgIds.add(mid);
+          }
           const messageElement = createChatMessage(msg.data);
           chronologicalOutput.appendChild(messageElement);
           scrollToBottom(chatContainer || chronologicalOutput);

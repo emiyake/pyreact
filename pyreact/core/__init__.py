@@ -5,6 +5,8 @@ from .runtime import schedule_rerender, run_renders
 from .core import VNode
 from .message_buffer import MessageBuffer
 from .core import component, hooks
+from .forward import ForwardRequest, _active_forward
+from .result import Result
 
 __all__ = [
     "HookContext",
@@ -15,4 +17,7 @@ __all__ = [
     "MessageBuffer",
     "component",
     "hooks",
+    "ForwardRequest",
+    "_active_forward",
+    "Result",
 ]

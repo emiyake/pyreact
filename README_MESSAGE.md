@@ -1,110 +1,100 @@
-# Componentes Log e Message
+# Componente Message
 
-Este projeto agora suporta dois tipos de componentes para exibição de informações:
+Componente unificado de output do framework. Cobre todos os casos de exibição de informações.
 
-## Componente Log
+## Uso
 
-O componente `Log` exibe informações como logs tradicionais, tanto no terminal quanto no browser.
-
-### Uso:
-```python
-from log import Log
-
-@component
-def MyComponent():
-    return [
-        Log(key="info", text="Esta é uma informação de log", trigger="mount"),
-        Log(key="debug", text="Informação de debug", trigger="change"),
-    ]
-```
-
-### Parâmetros:
-- `text`: Texto a ser exibido
-- `trigger`: Quando disparar ("mount" ou "change")
-- `key`: Chave única para o componente
-
-## Componente Message
-
-O componente `Message` exibe mensagens como balões de chat no browser e com formatação especial no terminal.
-
-### Uso:
 ```python
 from message import Message
 
 @component
 def MyComponent():
     return [
+        # Mensagem de chat (aparece como balão no browser)
         Message(
-            key="welcome", 
-            text="Olá! Bem-vindo!", 
-            sender="assistant", 
+            key="welcome",
+            text="Olá! Bem-vindo!",
+            sender="assistant",
             message_type="info",
-            trigger="mount"
+            trigger="mount",
         ),
+
+        # Mensagem do usuário
         Message(
-            key="user_msg", 
-            text="Esta é uma mensagem do usuário", 
-            sender="user", 
-            message_type="chat"
+            key="user_msg",
+            text="Esta é uma mensagem do usuário",
+            sender="user",
+            message_type="chat",
         ),
+
+        # Aviso do sistema
         Message(
-            key="warning", 
-            text="Atenção!", 
-            sender="system", 
-            message_type="warning"
+            key="warning",
+            text="Atenção!",
+            sender="system",
+            message_type="warning",
+        ),
+
+        # Log (apenas stdout, não aparece como balão de chat)
+        Message(
+            key="debug",
+            text="Informação de debug",
+            sender="system",
+            message_type="log",
+            trigger="mount",
         ),
     ]
 ```
 
-### Parâmetros:
+## Parâmetros
+
 - `text`: Texto da mensagem
-- `sender`: Quem enviou ("user", "assistant", "system")
-- `message_type`: Tipo da mensagem ("chat", "info", "warning", "error")
-- `trigger`: Quando disparar ("mount" ou "change")
+- `sender`: Quem enviou (`"user"`, `"assistant"`, `"system"`)
+- `message_type`: Tipo da mensagem:
+  - `"chat"` — mensagem de conversa (balão de chat)
+  - `"info"` — informação
+  - `"warning"` — aviso
+  - `"error"` — erro
+  - `"log"` — log de terminal (apenas stdout, não vai para o chat)
+- `trigger`: Quando disparar (`"mount"` ou `"change"`)
 - `key`: Chave única para o componente
 
-## Diferenças Visuais
+## Comportamento por message_type
 
-### No Browser:
-- **Log**: Aparece na área de logs (pre com fundo escuro)
-- **Message**: Aparece como balões de chat coloridos na área de mensagens
+### Tipos estruturados (`chat`, `info`, `warning`, `error`)
 
-### No Terminal:
-- **Log**: Aparece como texto normal
-- **Message**: Aparece com cores ANSI baseadas no sender e tipo:
-  - User: Azul
-  - Assistant: Verde
-  - System: Cinza
-  - Info: Ciano
-  - Warning: Amarelo
-  - Error: Vermelho
+| Modo     | Comportamento                                              |
+|----------|------------------------------------------------------------|
+| Terminal | `MessageBuffer.append()` + `print()` no stdout             |
+| Web      | `MessageBuffer.append()` → WebSocket canal MSG (sem print) |
 
-## Exemplo Completo
+### Tipo `log`
 
-Execute o arquivo `example_usage.py` para ver a diferença:
+| Modo     | Comportamento                          |
+|----------|----------------------------------------|
+| Terminal | `print()` no stdout                    |
+| Web      | `print()` → stdout redirecionado → WebSocket canal STDOUT (logs) |
 
-```bash
-# No terminal
-python example_usage.py
+## Deduplicação
 
-# No browser
-python main_web.py
-```
+Cada mensagem estruturada carrega um `msg_id` único (counter monotônico). O frontend ignora mensagens com IDs já renderizados, evitando duplicação em:
+- Replay de mensagens no reconnect (handler "hello")
+- Re-renders de componentes que re-emitem a mesma mensagem
 
 ## Integração com o Sistema
 
 Os componentes foram integrados nos seguintes locais:
 
-1. **QAHome**: Mensagem de boas-vindas como Message
-2. **QAAgent**: Respostas do assistente como Message
-3. **GuardRail**: Avisos de toxicidade como Message
-4. **Home**: Mensagem de boas-vindas como Message
+1. **QAHome**: Mensagem de boas-vindas
+2. **QAAgent**: Respostas do assistente + loading/error
+3. **GuardRail**: Avisos de toxicidade
+4. **Home**: Mensagem de boas-vindas + logs de rotas
+5. **About**: Informações da página + ajuda
+6. **NotFound**: Mensagem 404
 
 ## Configuração do Socket
 
-O sistema foi modificado para suportar dois tipos de mensagens no socket:
+O sistema suporta dois canais de mensagens no WebSocket:
 
-1. **stdout**: Para logs tradicionais
-2. **message**: Para mensagens de chat
-
-As mensagens são processadas diferentemente no frontend para renderizar como balões de chat.
+1. **STDOUT** (`logs`): Para logs de terminal (message_type="log" e prints diretos)
+2. **MSG** (`chat`): Para mensagens estruturadas (message_type="chat/info/warning/error")
