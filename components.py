@@ -3,7 +3,6 @@ from integrations.use_dspy import use_dspy_call
 from message import Message
 from pyreact.core.core import component, hooks
 from pyreact.core.result import Result
-from pyreact.core.provider import create_context
 from pyreact.router import (
     Route,
     Router,
@@ -22,26 +21,6 @@ import dotenv
 dotenv.load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-
-UserContext = create_context(default="anonymous", name="User")
-
-
-def use_user():
-    user = hooks.use_context(UserContext)
-
-    def _set(u):
-        UserContext.set(u)
-
-    return user, _set
-
-
-class ConvertDates(dspy.Signature):
-    """Extract dates from a sentence"""
-
-    sentence: str = dspy.InputField()
-    date_from: str = dspy.OutputField()
-    date_to: str = dspy.OutputField()
 
 
 class QASig(dspy.Signature):
@@ -218,7 +197,6 @@ def Home(input=""):
     )
 
     def _on_input_change():
-        print(f"Input: {input}")
         if input and input.strip():
             set_user_query(input)
 

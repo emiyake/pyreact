@@ -30,10 +30,6 @@ class RouteSelectionSig(dspy.Signature):
     path: str = dspy.OutputField()
 
 
-def _is_parametrized(path: str) -> bool:
-    return ":" in path or path.endswith("*")
-
-
 @component
 def RouterAgent(*, message: str, on_navigate: Callable[[str, int], None]):
     catalog = use_routes_catalog() or []

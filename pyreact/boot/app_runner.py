@@ -3,7 +3,7 @@ import concurrent.futures
 import inspect
 import threading
 import time
-from typing import Any, Optional, Callable
+from typing import Any, Optional
 
 from pyreact.core.hook import HookContext
 from pyreact.core.forward import ForwardRequest, _active_forward
